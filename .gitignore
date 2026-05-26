@@ -1,0 +1,19 @@
+node_modules/
+dist/
+src-tauri/target/
+.env
+.env.*
+!.env.example
+*.local
+
+# Tauri
+src-tauri/WixTools/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
