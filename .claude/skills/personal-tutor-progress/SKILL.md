@@ -1,6 +1,6 @@
 ---
 name: personal-tutor-progress
-description: "Progress tracking and spaced repetition for Personal Tutor — session logging, streak calculation, milestone tracking, SM-2 algorithm in review.rs, record_review_attempt, get_due_reviews, ReviewWidget, buildReviewItemId hash. Use for: adding progress features, understanding spaced repetition implementation, debugging review item state, building the ReviewWidget or Dashboard progress section. Trigger on: useProgress, useReview, useReviewCounts, useDueReviews, log_session, get_progress, get_streak, record_review_attempt, get_due_reviews, get_review_counts, ReviewItem, ReviewCounts, SM-2, spaced repetition, milestones, sessions table."
+description: "Progress tracking and spaced repetition for Personal Tutor — session logging, streak calculation, milestone tracking, SM-2 algorithm in review.rs, record_review_attempt, get_due_reviews, ReviewWidget, MorningBriefing aggregator, buildReviewItemId hash. Use for: adding progress features, understanding spaced repetition implementation, debugging review item state, building the ReviewWidget or Dashboard progress section, the morning briefing card. Trigger on: useProgress, useReview, useReviewCounts, useDueReviews, log_session, get_progress, get_streak, record_review_attempt, get_due_reviews, get_review_counts, get_morning_briefing, MorningBriefing, ReviewItem, ReviewCounts, SM-2, spaced repetition, milestones, sessions table."
 ---
 
 # Personal Tutor — Progress & Spaced Repetition
@@ -276,9 +276,9 @@ pub fn get_due_reviews(
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewCounts {
-    pub due_today: i32,
-    pub due_this_week: i32,
-    pub by_pillar: HashMap<String, i32>,  // pillar → count due today
+    pub total: i32,       // all review_items rows
+    pub due: i32,         // next_due <= now (overdue + today)
+    pub due_today: i32,   // next_due falls on today's local date
 }
 
 #[tauri::command]
@@ -327,9 +327,22 @@ interface ReviewItem {
 }
 
 interface ReviewCounts {
+  total: number;
+  due: number;
   dueToday: number;
-  dueThisWeek: number;
-  byPillar: Partial<Record<PillarId, number>>;
+}
+
+interface MorningBriefing {
+  date: string;
+  dayName: string;
+  weekNumber: number;
+  firstBlock: ScheduleBlock | null;
+  totalBlocks: number;
+  currentFocus: string;
+  streak: number;
+  reviewCounts: ReviewCounts;
+  headline: string;            // pre-formatted, e.g. "🧠 LLM — Attention mechanisms (45 min)"
+  notificationBody: string;    // "First up: LLM at 8:00 · 3 reviews due · 🔥 5-day streak"
 }
 ```
 
@@ -440,6 +453,24 @@ export function useDueReviews(pillar?: PillarId) {
   return { reviews, loading };
 }
 ```
+
+---
+
+## Morning Briefing Aggregator (`schedule.rs::get_morning_briefing`)
+
+The Dashboard's `MorningBriefing` card calls a single Tauri command that composes
+`get_today_schedule`, `get_streak`, and `get_review_counts` into one payload:
+
+```rust
+#[tauri::command]
+pub fn get_morning_briefing(app: AppHandle, date: String) -> Result<MorningBriefing, String>
+```
+
+- Internally calls the three commands above; streak/review errors fall back to zero defaults so the briefing never fails on first run.
+- Pre-formats `headline` (first block of the day) and `notificationBody` (joined "First up · N reviews · 🔥 streak").
+- Frontend (`src/components/dashboard/MorningBriefing.tsx`) calls `get_morning_briefing` on mount and, if before 12:00 local and not yet fired today (`localStorage['morning-briefing-shown']`), also calls `schedule_notification` to fire a system push.
+
+Lives in `commands/schedule.rs` — not `progress.rs` or `review.rs` — but cross-references both. When changing `ReviewCounts` or `get_streak` signatures, update the briefing struct too.
 
 ---
 

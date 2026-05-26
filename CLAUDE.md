@@ -31,7 +31,7 @@ Rust Backend (Tauri v2 + rusqlite + Tokio)
     │   ├── conversations.rs → CRUD + bulk_import_sync
     │   ├── progress.rs      → log_session, get_progress, get_streak, update_milestone
     │   ├── review.rs        → SM-2 spaced repetition (record_review_attempt, get_due_reviews, get_review_counts)
-    │   ├── schedule.rs      → get_today_schedule, schedule_notification
+    │   ├── schedule.rs      → get_today_schedule, schedule_notification, get_morning_briefing
     │   ├── sync_server.rs   → Axum-based local sync server (start/stop/status)
     │   └── voice.rs         → STT model management, transcribe_audio, ElevenLabs TTS
     └── ai/                  → LLM provider implementations
@@ -102,7 +102,7 @@ Default: `anthropic / claude-sonnet-4-5`.
 
 ## Key Types
 All TypeScript interfaces in `src/data/types.ts`. Match Rust serde structs exactly (camelCase).
-Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`.
+Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`, `MorningBriefing`.
 
 ## Spaced Repetition
 SM-2 algorithm in `src-tauri/src/commands/review.rs`. Quality grades 0–5 (≥3 passes). Failed reviews reset interval to 1 day; ease factor floored at 1.3.
