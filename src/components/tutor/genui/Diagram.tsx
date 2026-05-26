@@ -23,6 +23,12 @@ export default function Diagram({ code, pillar }: DiagramProps) {
     async function render() {
       try {
         const mermaid = (await import('mermaid')).default;
+        const trimmed = code.trim();
+
+        if (!trimmed) {
+          if (!cancelled) setError('Empty diagram');
+          return;
+        }
 
         mermaid.initialize({
           startOnLoad: false,
@@ -46,10 +52,23 @@ export default function Diagram({ code, pillar }: DiagramProps) {
           securityLevel: 'loose',
         });
 
-        const { svg: rendered } = await mermaid.render(id, code.trim());
+        // Pre-validate. mermaid.parse with suppressErrors returns false on bad syntax
+        // instead of mermaid.render injecting a "Syntax error in text" SVG.
+        const parsed = await mermaid.parse(trimmed, { suppressErrors: true });
+        if (parsed === false) {
+          if (!cancelled) setError('Invalid Mermaid syntax');
+          return;
+        }
+
+        const { svg: rendered } = await mermaid.render(id, trimmed);
         if (!cancelled) {
-          setSvg(rendered);
-          setError('');
+          // Defensive: if mermaid still returned an error SVG, treat as failure.
+          if (/aria-roledescription="error"|Syntax error in text/i.test(rendered)) {
+            setError('Invalid Mermaid syntax');
+          } else {
+            setSvg(rendered);
+            setError('');
+          }
         }
       } catch (err) {
         if (!cancelled) {
