@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle2, XCircle } from 'lucide-react';
 import { PillarId } from '@/data/types';
 import { pillarColor } from '@/lib/utils';
+import { buildReviewItemId, useReview } from '@/hooks/useReview';
 
 interface QuizProps {
   data: {
@@ -19,6 +20,15 @@ export default function Quiz({ data, pillar }: QuizProps) {
   const color = pillar ? pillarColor(pillar) : '#2E5FA3';
   const answered = selected !== null;
   const isCorrect = selected === data.correct;
+  const { recordAttempt } = useReview();
+
+  const handleSelect = (i: number) => {
+    if (answered) return;
+    setSelected(i);
+    const quality = i === data.correct ? 5 : 1;
+    const itemId = buildReviewItemId('quiz', pillar ?? null, data.question);
+    void recordAttempt(itemId, 'quiz', pillar ?? null, data.question, quality);
+  };
 
   const optionStyle = (i: number) => {
     if (!answered) {
@@ -59,7 +69,7 @@ export default function Quiz({ data, pillar }: QuizProps) {
           {data.options.map((option, i) => (
             <button
               key={i}
-              onClick={() => !answered && setSelected(i)}
+              onClick={() => handleSelect(i)}
               disabled={answered}
               className={`w-full text-left px-4 py-2.5 rounded-xl border text-sm transition-all flex items-center justify-between gap-3 ${optionStyle(i)}`}
             >

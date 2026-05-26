@@ -8,6 +8,7 @@ import { getGreeting, getWeekNumber } from '@/lib/utils';
 import TodayCard from './TodayCard';
 import PillarProgress from './PillarProgress';
 import StreakWidget from './StreakWidget';
+import ReviewWidget from './ReviewWidget';
 
 export default function Dashboard() {
   const { currentBlock, todaySchedule } = usePlan();
@@ -66,6 +67,15 @@ export default function Dashboard() {
           ) : (
             <div className="h-40 rounded-xl bg-[#0f1629] border border-[#1a2540] animate-pulse" />
           )}
+        </motion.div>
+
+        {/* Due reviews (spaced repetition) */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.08 }}
+        >
+          <ReviewWidget />
         </motion.div>
 
         {/* Pillar progress row */}

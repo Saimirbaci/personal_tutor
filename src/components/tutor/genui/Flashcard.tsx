@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { RotateCcw, CheckCircle2, RefreshCw } from 'lucide-react';
 import { PillarId } from '@/data/types';
 import { pillarColor } from '@/lib/utils';
+import { buildReviewItemId, useReview } from '@/hooks/useReview';
 
 interface FlashcardProps {
   data: { question: string; answer: string };
@@ -13,15 +14,23 @@ export default function Flashcard({ data, pillar }: FlashcardProps) {
   const [flipped, setFlipped] = useState(false);
   const [status, setStatus] = useState<'idle' | 'got-it' | 'review'>('idle');
   const color = pillar ? pillarColor(pillar) : '#2E5FA3';
+  const { recordAttempt } = useReview();
+
+  const recordQuality = (quality: number) => {
+    const itemId = buildReviewItemId('flashcard', pillar ?? null, data.question);
+    void recordAttempt(itemId, 'flashcard', pillar ?? null, data.question, quality);
+  };
 
   const handleGotIt = () => {
     setStatus('got-it');
     setFlipped(false);
+    recordQuality(5);
   };
 
   const handleReview = () => {
     setStatus('review');
     setFlipped(false);
+    recordQuality(1);
   };
 
   return (

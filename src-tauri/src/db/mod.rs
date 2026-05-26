@@ -76,6 +76,23 @@ pub fn init(app: &AppHandle) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation
             ON chat_messages(conversation_id, created_at);
+
+        CREATE TABLE IF NOT EXISTS review_items (
+            item_id       TEXT PRIMARY KEY,
+            item_type     TEXT NOT NULL,
+            pillar        TEXT,
+            content       TEXT NOT NULL,
+            ease_factor   REAL NOT NULL DEFAULT 2.5,
+            interval_days REAL NOT NULL DEFAULT 0,
+            repetitions   INTEGER NOT NULL DEFAULT 0,
+            last_quality  INTEGER,
+            last_seen     TEXT NOT NULL,
+            next_due      TEXT NOT NULL,
+            created_at    TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_review_items_due
+            ON review_items(next_due);
         ",
     )?;
 
