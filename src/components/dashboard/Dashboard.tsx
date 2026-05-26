@@ -9,6 +9,7 @@ import TodayCard from './TodayCard';
 import PillarProgress from './PillarProgress';
 import StreakWidget from './StreakWidget';
 import ReviewWidget from './ReviewWidget';
+import MorningBriefing from './MorningBriefing';
 
 export default function Dashboard() {
   const { currentBlock, todaySchedule } = usePlan();
@@ -55,6 +56,9 @@ export default function Dashboard() {
             </button>
           )}
         </motion.div>
+
+        {/* Morning briefing */}
+        <MorningBriefing />
 
         {/* Today's schedule */}
         <motion.div

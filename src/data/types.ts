@@ -215,3 +215,16 @@ export interface ReviewCounts {
   due: number;
   dueToday: number;
 }
+
+export interface MorningBriefing {
+  date: string;
+  dayName: string;
+  weekNumber: number;
+  firstBlock: ScheduleBlock | null;
+  totalBlocks: number;
+  currentFocus: string;
+  streak: number;
+  reviewCounts: ReviewCounts;
+  headline: string;
+  notificationBody: string;
+}
