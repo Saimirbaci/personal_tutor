@@ -191,3 +191,27 @@ export interface ElevenLabsVoice {
   name: string;
   category: string;
 }
+
+// ── Spaced Repetition ─────────────────────────────────────────────────────────
+
+export type ReviewItemType = 'flashcard' | 'quiz';
+
+export interface ReviewItem {
+  itemId: string;
+  itemType: ReviewItemType;
+  pillar: PillarId | null;
+  content: string;
+  easeFactor: number;
+  intervalDays: number;
+  repetitions: number;
+  lastQuality: number | null;
+  lastSeen: string;
+  nextDue: string;
+  createdAt: string;
+}
+
+export interface ReviewCounts {
+  total: number;
+  due: number;
+  dueToday: number;
+}

@@ -18,3 +18,5 @@ src-tauri/WixTools/
 *.swp
 *.swo
 settings.local.json
+.mcp.json
+.friday/
