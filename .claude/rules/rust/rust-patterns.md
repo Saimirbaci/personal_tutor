@@ -27,12 +27,14 @@ pub async fn command_name(
 ```
 
 ## Database (rusqlite)
-- `DbState(pub Mutex<Connection>)` managed by Tauri's state system
-- Always use `lock().map_err(|e| e.to_string())?` — never `.unwrap()`
-- Lock for the shortest possible scope — extract data and release before any async operation
+Two access patterns coexist — pick one consistently per command file:
+- **Shared `DbState(pub Mutex<Connection>)`** — preferred for write-heavy or transactional flows. Always `lock().map_err(|e| e.to_string())?` — never `.unwrap()`. Lock for the shortest possible scope; extract data and release before any `await`.
+- **Per-call `db::get_connection(&app)`** — opens a fresh `Connection` (used by `review.rs`). Safe under WAL for short reads/writes; useful for synchronous `#[tauri::command] pub fn` handlers that don't share state.
+
+Rules that apply to both:
 - Use parameterized queries exclusively: `params![val1, val2]`
 - Handle `rusqlite::Error::QueryReturnedNoRows` explicitly (map to `None` or 404)
-- Tables: `sessions`, `milestones`, `settings`, `conversations`, `chat_messages`
+- Tables: `sessions`, `milestones`, `settings`, `conversations`, `chat_messages`, `review_items`
 
 ```rust
 // Good — brief lock, no await while holding

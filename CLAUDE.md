@@ -30,6 +30,7 @@ Rust Backend (Tauri v2 + rusqlite + Tokio)
     │   ├── ai.rs            → stream_chat, get_providers, model listing, save_provider_config
     │   ├── conversations.rs → CRUD + bulk_import_sync
     │   ├── progress.rs      → log_session, get_progress, get_streak, update_milestone
+    │   ├── review.rs        → SM-2 spaced repetition (record_review_attempt, get_due_reviews, get_review_counts)
     │   ├── schedule.rs      → get_today_schedule, schedule_notification
     │   ├── sync_server.rs   → Axum-based local sync server (start/stop/status)
     │   └── voice.rs         → STT model management, transcribe_audio, ElevenLabs TTS
@@ -76,9 +77,12 @@ SQLite at `{app_data_dir}/tutor.db`. WAL mode, foreign keys ON.
 - **`milestones`** — per-pillar milestone status (pending/in-progress/complete)
 - **`conversations`** — chat conversation metadata (pillar, title)
 - **`chat_messages`** — individual messages (role, content, genui JSON)
+- **`review_items`** — SM-2 spaced repetition state (item_id, item_type, pillar, ease_factor, interval_days, repetitions, next_due)
 - **`settings`** — key/value store
 
-`DbState(Mutex<Connection>)` managed by Tauri. All DB access via `lock()`.
+Two DB access patterns coexist:
+- `DbState(Mutex<Connection>)` — shared connection, locked per call (used by most commands)
+- `db::get_connection(&app)` — opens a fresh `rusqlite::Connection` per call (used by `review.rs`); safe under WAL but bypasses the shared mutex
 
 ## Sync Server
 Axum HTTP server on a local port (start/stop via Tauri commands). Used to sync conversations from mobile/web to desktop. `SyncServerHandle(Mutex<Option<...>>)` managed as Tauri app state.
@@ -98,7 +102,14 @@ Default: `anthropic / claude-sonnet-4-5`.
 
 ## Key Types
 All TypeScript interfaces in `src/data/types.ts`. Match Rust serde structs exactly (camelCase).
-Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`.
+Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`.
+
+## Spaced Repetition
+SM-2 algorithm in `src-tauri/src/commands/review.rs`. Quality grades 0–5 (≥3 passes). Failed reviews reset interval to 1 day; ease factor floored at 1.3.
+- Frontend hooks: `useReview` (recordAttempt), `useReviewCounts` (polls every 60s), `useDueReviews`
+- Item IDs derived deterministically via `buildReviewItemId(type, pillar, question)` (djb2 hash) so the same flashcard/quiz across sessions maps to one review row
+- `Flashcard` and `Quiz` GenUI renderers call `recordAttempt` on user interaction
+- `ReviewWidget` on the Dashboard surfaces due-count
 
 ## Tauri IPC Layer
 `src/lib/tauri.ts` provides `tauriInvoke()` and `tauriListen()` wrappers with browser fallback mocks for dev server testing without full Tauri.
