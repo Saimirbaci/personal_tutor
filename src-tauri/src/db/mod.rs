@@ -1,0 +1,89 @@
+use anyhow::Result;
+use rusqlite::Connection;
+use std::path::PathBuf;
+use std::sync::Mutex;
+use tauri::{AppHandle, Manager};
+
+pub struct DbState(pub Mutex<Connection>);
+
+pub fn get_db_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    Ok(data_dir.join("tutor.db"))
+}
+
+fn get_db_path_internal(app: &AppHandle) -> PathBuf {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .expect("Failed to get app data dir");
+    std::fs::create_dir_all(&data_dir).expect("Failed to create app data dir");
+    data_dir.join("tutor.db")
+}
+
+pub fn init(app: &AppHandle) -> Result<()> {
+    let db_path = get_db_path_internal(app);
+    let conn = Connection::open(&db_path)?;
+
+    conn.execute_batch(
+        "
+        PRAGMA journal_mode=WAL;
+        PRAGMA foreign_keys=ON;
+
+        CREATE TABLE IF NOT EXISTS sessions (
+            id          TEXT PRIMARY KEY,
+            date        TEXT NOT NULL,
+            pillar      TEXT NOT NULL,
+            hours       REAL NOT NULL,
+            energy      INTEGER NOT NULL,
+            note        TEXT NOT NULL DEFAULT '',
+            created_at  TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS milestones (
+            id          TEXT PRIMARY KEY,
+            pillar      TEXT NOT NULL,
+            month       INTEGER NOT NULL,
+            status      TEXT NOT NULL DEFAULT 'pending',
+            updated_at  TEXT NOT NULL,
+            UNIQUE(pillar, month)
+        );
+
+        CREATE TABLE IF NOT EXISTS settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS conversations (
+            id          TEXT PRIMARY KEY,
+            pillar      TEXT,
+            title       TEXT NOT NULL DEFAULT 'New conversation',
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id              TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            role            TEXT NOT NULL,
+            content         TEXT NOT NULL,
+            genui           TEXT,
+            created_at      TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation
+            ON chat_messages(conversation_id, created_at);
+        ",
+    )?;
+
+    app.manage(DbState(Mutex::new(conn)));
+    Ok(())
+}
+
+pub fn get_connection(app: &AppHandle) -> rusqlite::Result<Connection> {
+    let db_path = get_db_path_internal(app);
+    Connection::open(&db_path)
+}
