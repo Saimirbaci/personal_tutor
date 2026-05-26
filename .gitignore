@@ -17,3 +17,4 @@ src-tauri/WixTools/
 .idea/
 *.swp
 *.swo
+settings.local.json
