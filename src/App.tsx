@@ -40,6 +40,9 @@ import ProgressView from '@/components/progress/ProgressView';
 import Settings from '@/components/settings/Settings';
 import { useAppStore } from '@/store/appStore';
 import { useProgress } from '@/hooks/useProgress';
+import { runSessionSummary } from '@/hooks/useSessionSummary';
+import { tauriInvoke } from '@/lib/tauri';
+import type { ConversationListEntry } from '@/store/appStore';
 
 const pageVariants = {
   initial: { opacity: 0, y: 8 },
@@ -56,6 +59,40 @@ export default function App() {
   useEffect(() => {
     loadProgress();
   }, [loadProgress]);
+
+  // ── Post-session summary: on-load retry + best-effort window-close trigger ──
+  useEffect(() => {
+    // Best-effort: summarise the open conversation when the window/app closes.
+    const onBeforeUnload = () => {
+      const id = useAppStore.getState().activeConversationId;
+      if (id) void runSessionSummary(id); // fire-and-forget; not awaited
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+
+    // On launch, backfill summaries for recent conversations that have messages
+    // but no summary row (e.g. the app was closed mid-session last time).
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await tauriInvoke<ConversationListEntry[]>('list_conversations');
+        if (cancelled) return;
+        const candidates = list
+          .filter((c) => c.message_count >= 4)
+          .slice(0, 3); // cap work on launch
+        for (const c of candidates) {
+          if (cancelled) break;
+          void runSessionSummary(c.id); // short-circuits if a summary already exists
+        }
+      } catch (err) {
+        console.error('summary backfill failed:', err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('beforeunload', onBeforeUnload);
+    };
+  }, []);
 
   // Sync store navigation with router
   useEffect(() => {
