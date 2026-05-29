@@ -29,12 +29,12 @@ pub async fn command_name(
 ## Database (rusqlite)
 Two access patterns coexist — pick one consistently per command file:
 - **Shared `DbState(pub Mutex<Connection>)`** — preferred for write-heavy or transactional flows. Always `lock().map_err(|e| e.to_string())?` — never `.unwrap()`. Lock for the shortest possible scope; extract data and release before any `await`.
-- **Per-call `db::get_connection(&app)`** — opens a fresh `Connection` (used by `review.rs`). Safe under WAL for short reads/writes; useful for synchronous `#[tauri::command] pub fn` handlers that don't share state.
+- **Per-call `db::get_connection(&app)`** — opens a fresh `Connection` (used by `review.rs`, `digest.rs`). Safe under WAL for short reads/writes; useful for synchronous `#[tauri::command] pub fn` handlers that don't share state, or for async commands that must release the connection before a long `await` (e.g. an AI call).
 
 Rules that apply to both:
 - Use parameterized queries exclusively: `params![val1, val2]`
 - Handle `rusqlite::Error::QueryReturnedNoRows` explicitly (map to `None` or 404)
-- Tables: `sessions`, `milestones`, `settings`, `conversations`, `chat_messages`, `review_items`, `conversation_summaries`
+- Tables: `sessions`, `milestones`, `settings`, `conversations`, `chat_messages`, `review_items`, `conversation_summaries`, `weekly_digests`
 
 ```rust
 // Good — brief lock, no await while holding
@@ -60,6 +60,8 @@ window.emit("ai-done", ())?;
 window.emit("ai-error", error_message)?;
 ```
 Always emit `ai-done` or `ai-error` — never leave the frontend in a streaming state.
+
+For background AI tasks (weekly digests, session summaries) that must NOT touch the live-chat event stream, use the `pub(crate) collect_completion(messages, system, config, timeout_secs)` helper in `commands/ai.rs` instead. It buffers every token into a single `String` and returns it without emitting `ai-token`/`ai-done`/`ai-error`, so it can run concurrently with live chat.
 
 ## AI Provider Trait
 ```rust

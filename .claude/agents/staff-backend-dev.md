@@ -46,6 +46,8 @@ pub async fn get_conversation_messages(
 }
 ```
 
+For async commands that must release the connection **before** a long `await` (e.g. an AI call), use the per-call `db::get_connection(&app)` pattern instead (as in `review.rs`, `digest.rs`): open a fresh connection inside a scoped block to gather data, drop it, run the `await`, then re-open another connection to persist results. Each connection is short-lived and safe under WAL.
+
 ### AI Streaming Pattern
 ```rust
 // From commands/ai.rs — always emit ai-done or ai-error
@@ -73,6 +75,18 @@ pub async fn stream_chat(
         })
 }
 ```
+
+### Background AI Tasks (no event emission)
+For tasks that generate text in the background (weekly digests in `digest.rs`, session summaries) and must not clobber the live-chat event listeners, use the `pub(crate)` helper in `commands/ai.rs` instead of `stream_chat`:
+```rust
+let text = crate::commands::ai::collect_completion(
+    messages,                       // Vec<AiMessage>
+    Some(system_prompt.to_string()),
+    provider_config,                // ProviderConfig
+    90,                             // timeout in seconds
+).await?;
+```
+It buffers every token into a single `String` and returns it without emitting `ai-token`/`ai-done`/`ai-error`, so it can run concurrently with live chat. `summarize_conversation` is a thin wrapper over it.
 
 ### Adding a New AI Provider
 1. Create `src-tauri/src/ai/<provider>.rs` implementing `AiProvider` trait
@@ -127,7 +141,7 @@ conn.execute_batch("
     );
 ")?;
 ```
-No migration framework — the `IF NOT EXISTS` guards make it safe to re-run.
+No migration framework — the `IF NOT EXISTS` guards make it safe to re-run. Add indexes on frequently-queried columns in the same `execute_batch()` (e.g. `weekly_digests` ships with `idx_weekly_digests_week_start ON weekly_digests(week_start DESC)`), and use a `UNIQUE` column as a stable upsert key where applicable (`weekly_digests.week_start`).
 
 ## Implementation Checklist for New Commands
 - [ ] Handler in `commands/<domain>.rs`

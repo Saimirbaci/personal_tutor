@@ -50,6 +50,29 @@ const { addMessage, clearMessages } = useAppStore((s) => ({
 // 4. If persisted, add to partialize() in persist config
 ```
 
+### Data-Access Hooks (backend-loaded, ephemeral state)
+For features that load data from the backend into the store (e.g. weekly digests), keep the
+state ephemeral (NOT in the persist config) and create a dedicated hook in `src/hooks/` that
+owns every `tauriInvoke` call plus the store mutations. Components read via a selector and call
+the hook's actions — they never invoke Tauri directly.
+```typescript
+// src/hooks/useWeeklyDigest.ts — owns all digest Tauri calls + store writes
+export function useWeeklyDigest() {
+  const setWeeklyDigests = useAppStore((s) => s.setWeeklyDigests);
+  const loadDigests = useCallback(async (limit = 12) => {
+    const rows = await tauriInvoke<WeeklyDigest[]>('get_weekly_digests', { limit });
+    setWeeklyDigests(rows);
+    return rows;
+  }, [setWeeklyDigests]);
+  return { loadDigests, /* generate, maybeGenerateDue, exportDigest */ };
+}
+
+// In the component: selector + hook actions, no direct invoke()
+const digests = useAppStore((s) => s.weeklyDigests);
+const { loadDigests } = useWeeklyDigest();
+useEffect(() => { loadDigests(); }, [loadDigests]);
+```
+
 ### GenUI System
 ```typescript
 // Rendering GenUI blocks — extend GenUIRenderer component
@@ -147,6 +170,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 ## Implementation Checklist for New Components
 - [ ] Types added to `src/data/types.ts`
 - [ ] Tauri calls go through hook, not directly in component
+- [ ] Backend-loaded data lives in ephemeral store state (not in the persist config)
 - [ ] `npx tsc --noEmit` passes
 - [ ] Tailwind classes only (no inline styles)
 - [ ] Fine-grained Zustand selector (no `useAppStore()` without selector)
