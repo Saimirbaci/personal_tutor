@@ -5,7 +5,7 @@
   "identifier": "com.augmentifai.personal-tutor",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://localhost:3017",
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build"
   },
