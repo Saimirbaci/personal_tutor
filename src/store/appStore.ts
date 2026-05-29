@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { AiMessage, PillarId, ProgressData, ProviderConfig, VoiceConfig } from '@/data/types';
+import { AiMessage, MasteryScore, PillarId, ProgressData, ProviderConfig, VoiceConfig } from '@/data/types';
 
 export interface ConversationSummary {
   id: string;
@@ -33,6 +33,9 @@ interface AppState {
   progress: ProgressData | null;
   streak: number;
 
+  // Mastery (ephemeral — recomputable, never persisted)
+  masteryByItem: Record<string, number>;
+
   // Voice
   voiceConfig: VoiceConfig;
 
@@ -53,6 +56,7 @@ interface AppState {
   removeConversation: (id: string) => void;
   setProgress: (p: ProgressData) => void;
   setStreak: (s: number) => void;
+  setMasteryScores: (scores: MasteryScore[]) => void;
   setProviderConfig: (c: ProviderConfig) => void;
   toggleSidebar: () => void;
   setMobileSidebarOpen: (open: boolean) => void;
@@ -81,6 +85,8 @@ export const useAppStore = create<AppState>()(
 
       progress: null,
       streak: 0,
+
+      masteryByItem: {},
 
       voiceConfig: {
         enabled: false,
@@ -160,6 +166,13 @@ export const useAppStore = create<AppState>()(
 
       setProgress: (p) => set({ progress: p }),
       setStreak: (s) => set({ streak: s }),
+      setMasteryScores: (scores) =>
+        set(() => ({
+          masteryByItem: scores.reduce<Record<string, number>>((acc, s) => {
+            acc[s.itemId] = s.score;
+            return acc;
+          }, {}),
+        })),
       setProviderConfig: (c) => set({ providerConfig: c }),
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
       setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),

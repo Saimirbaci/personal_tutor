@@ -215,3 +215,25 @@ export interface ReviewCounts {
   due: number;
   dueToday: number;
 }
+
+// ── Per-Topic Mastery ─────────────────────────────────────────────────────────
+
+/** Blended 0–100 mastery score for a single curriculum item.
+ *  Mirrors the Rust `MasteryScore` serde struct (camelCase). */
+export interface MasteryScore {
+  pillarId: PillarId;
+  itemId: string;
+  score: number;
+  quizAccuracy: number | null;
+  easeNorm: number | null;
+  depthNorm: number | null;
+  updatedAt: string;
+}
+
+/** Reference passed to `recompute_mastery` so curriculum data stays
+ *  single-sourced in `plan.ts` rather than duplicated in Rust. */
+export interface CurriculumItemRef {
+  itemId: string;
+  pillarId: PillarId;
+  topic: string;
+}

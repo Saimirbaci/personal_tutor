@@ -19,6 +19,13 @@ export function buildReviewItemId(
   return `${itemType}:${pillar ?? 'none'}:${stableHash(question.trim())}`;
 }
 
+/** Deterministic id for a curriculum item, derived from its pillar + topic.
+ *  Topic strings are not unique across months, so the pillar is folded in.
+ *  Shared by the frontend and the mastery recompute payload so item_ids align. */
+export function buildCurriculumItemId(pillar: PillarId, topic: string): string {
+  return `curriculum:${pillar}:${stableHash(topic.trim())}`;
+}
+
 export function useReview() {
   const recordAttempt = useCallback(
     async (
