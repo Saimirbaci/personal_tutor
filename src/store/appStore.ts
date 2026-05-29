@@ -2,7 +2,9 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { AiMessage, PillarId, ProgressData, ProviderConfig, VoiceConfig } from '@/data/types';
 
-export interface ConversationSummary {
+/** A lightweight conversation row used in the sidebar/history list.
+ *  (Distinct from the AI-generated `ConversationSummary` note in data/types.ts.) */
+export interface ConversationListEntry {
   id: string;
   title: string;
   pillar: string | null;
@@ -27,7 +29,9 @@ interface AppState {
 
   // Conversations
   activeConversationId: string | null;
-  conversationList: ConversationSummary[];
+  conversationList: ConversationListEntry[];
+  /** A prompt queued by another view (e.g. a summary's "Reply") to be sent once the tutor opens. */
+  pendingPrompt: string | null;
 
   // Progress
   progress: ProgressData | null;
@@ -48,8 +52,9 @@ interface AppState {
   finalizeStream: () => void;
   startStream: () => void;
   setActiveConversation: (id: string | null) => void;
-  setConversationList: (list: ConversationSummary[]) => void;
-  upsertConversation: (summary: ConversationSummary) => void;
+  setPendingPrompt: (prompt: string | null) => void;
+  setConversationList: (list: ConversationListEntry[]) => void;
+  upsertConversation: (summary: ConversationListEntry) => void;
   removeConversation: (id: string) => void;
   setProgress: (p: ProgressData) => void;
   setStreak: (s: number) => void;
@@ -78,6 +83,7 @@ export const useAppStore = create<AppState>()(
 
       activeConversationId: null,
       conversationList: [],
+      pendingPrompt: null,
 
       progress: null,
       streak: 0,
@@ -138,6 +144,7 @@ export const useAppStore = create<AppState>()(
       },
 
       setActiveConversation: (id) => set({ activeConversationId: id }),
+      setPendingPrompt: (prompt) => set({ pendingPrompt: prompt }),
       setConversationList: (list) => set({ conversationList: list }),
       upsertConversation: (summary) =>
         set((state) => {

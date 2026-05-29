@@ -1,13 +1,57 @@
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useAppStore } from '@/store/appStore';
 import { PILLARS } from '@/data/plan';
 import { formatHours, formatDateShort } from '@/lib/utils';
-import { PillarId } from '@/data/types';
+import { ConversationSummary, PillarId } from '@/data/types';
+import { tauriInvoke } from '@/lib/tauri';
+import SummaryCard from '@/components/SummaryCard';
+
+interface SummaryRow {
+  conversationId: string;
+  takeaways: string[];
+  reflection: string;
+  flaggedItems: ConversationSummary['flaggedItems'];
+  model?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  conversationTitle?: string | null;
+  conversationPillar?: string | null;
+}
 
 export default function ProgressView() {
   const { progress, streak } = useAppStore();
 
   const pillars = PILLARS;
+
+  const [summaries, setSummaries] = useState<ConversationSummary[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await tauriInvoke<SummaryRow[]>('list_recent_summaries', { limit: 10 });
+        if (cancelled) return;
+        setSummaries(
+          rows.map((r) => ({
+            conversationId: r.conversationId,
+            takeaways: r.takeaways,
+            reflection: r.reflection,
+            flaggedItems: r.flaggedItems,
+            model: r.model ?? undefined,
+            createdAt: r.createdAt,
+            updatedAt: r.updatedAt,
+            conversationTitle: r.conversationTitle ?? undefined,
+            conversationPillar: (r.conversationPillar ?? null) as PillarId | null,
+          }))
+        );
+      } catch (err) {
+        console.error('Failed to load summaries:', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="h-full overflow-y-auto">
@@ -36,6 +80,27 @@ export default function ProgressView() {
               Keep logging daily sessions to maintain momentum
             </p>
           </div>
+        </motion.div>
+
+        {/* Recent session summaries */}
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.08 }}
+          className="rounded-xl bg-[#0f1629] border border-[#1a2540] p-5"
+        >
+          <h2 className="text-sm font-semibold text-[#e2e8f0] mb-4">Recent session summaries</h2>
+          {summaries.length === 0 ? (
+            <p className="text-xs text-[#4a5568]">
+              Your session summaries will appear here after you finish a chat.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {summaries.map((s, i) => (
+                <SummaryCard key={s.conversationId} summary={s} defaultOpen={i === 0} />
+              ))}
+            </div>
+          )}
         </motion.div>
 
         {/* Pillar breakdown */}

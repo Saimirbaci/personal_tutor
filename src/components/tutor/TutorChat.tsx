@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { PanelLeft, Plus, Trash2, Pencil, Check, X, MessageSquare } from 'lucide-react';
+import { PanelLeft, Plus, Trash2, Pencil, Check, X, MessageSquare, FileText } from 'lucide-react';
+import { tauriInvoke } from '@/lib/tauri';
 import { useAppStore } from '@/store/appStore';
 import { useAI } from '@/hooks/useAI';
 import { useConversations } from '@/hooks/useConversations';
+import { runSessionSummary, useConversationSummary } from '@/hooks/useSessionSummary';
 import { useVoice } from '@/hooks/useVoice';
+import SummaryCard from '@/components/SummaryCard';
 import { useMobile } from '@/hooks/useMobile';
 import { PILLARS, PLAN } from '@/data/plan';
 import { PillarId, CurriculumItem } from '@/data/types';
-import { ConversationSummary } from '@/store/appStore';
+import { ConversationListEntry } from '@/store/appStore';
 import MessageBubble from './MessageBubble';
 import InputBar from './InputBar';
 import MarkdownContent from './MarkdownContent';
@@ -94,8 +97,8 @@ function relativeDate(isoStr: string): string {
 }
 
 // ── Group conversations by day label ─────────────────────────────────────────
-function groupByDate(list: ConversationSummary[]): { label: string; items: ConversationSummary[] }[] {
-  const groups = new Map<string, ConversationSummary[]>();
+function groupByDate(list: ConversationListEntry[]): { label: string; items: ConversationListEntry[] }[] {
+  const groups = new Map<string, ConversationListEntry[]>();
   for (const c of list) {
     const label = relativeDate(c.updated_at);
     if (!groups.has(label)) groups.set(label, []);
@@ -154,6 +157,8 @@ export default function TutorChat() {
     activeConversationId,
     conversationList,
     setActiveConversation,
+    pendingPrompt,
+    setPendingPrompt,
   } = useAppStore((s) => ({
     messages: s.messages,
     isStreaming: s.isStreaming,
@@ -162,6 +167,8 @@ export default function TutorChat() {
     activeConversationId: s.activeConversationId,
     conversationList: s.conversationList,
     setActiveConversation: s.setActiveConversation,
+    pendingPrompt: s.pendingPrompt,
+    setPendingPrompt: s.setPendingPrompt,
   }));
 
   const { sendMessage, clearMessages } = useAI();
@@ -182,6 +189,36 @@ export default function TutorChat() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevStreamingRef = useRef(false);
+
+  // Read-only summary for the conversation currently open (shown at top of the thread).
+  const { summary: activeSummary } = useConversationSummary(activeConversationId);
+
+  // Ids of conversations that have a saved summary (for the sidebar badge).
+  const [summarisedIds, setSummarisedIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await tauriInvoke<Array<{ conversationId: string }>>('list_recent_summaries', {
+          limit: 200,
+        });
+        if (!cancelled) setSummarisedIds(new Set(rows.map((r) => r.conversationId)));
+      } catch (err) {
+        console.error('Failed to load summary index:', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSummary, conversationList.length]);
+
+  // Fire-and-forget summary generation for a session that's ending.
+  // runSessionSummary internally short-circuits (existing summary / <4 messages) and dedupes.
+  const summariseSession = useCallback((conversationId: string | null) => {
+    if (!conversationId) return;
+    if (useAppStore.getState().isStreaming) return; // never summarise mid-stream
+    void runSessionSummary(conversationId);
+  }, []);
 
   // ── On mount: load conversation list and open/create the latest ───────────
   useEffect(() => {
@@ -221,22 +258,44 @@ export default function TutorChat() {
     prevStreamingRef.current = isStreaming;
   }, [isStreaming]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Summarise on navigate-away / unmount ──────────────────────────────────
+  // Track the latest active id in a ref so the unmount cleanup isn't stale.
+  const activeConvRef = useRef<string | null>(activeConversationId);
+  useEffect(() => {
+    activeConvRef.current = activeConversationId;
+  }, [activeConversationId]);
+  useEffect(() => {
+    return () => {
+      summariseSession(activeConvRef.current);
+    };
+  }, [summariseSession]);
+
+  // ── Consume a queued prompt (e.g. "Reply" from a summary's reflection) ────
+  useEffect(() => {
+    if (!pendingPrompt || isStreaming || !activeConversationId) return;
+    const prompt = pendingPrompt;
+    setPendingPrompt(null);
+    sendMessage(prompt, selectedPillar ?? undefined);
+  }, [pendingPrompt, isStreaming, activeConversationId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── New conversation ──────────────────────────────────────────────────────
   const handleNewConversation = useCallback(async () => {
+    summariseSession(activeConversationId); // session ending — summarise the old one
     clearMessages();
     await createConversation(selectedPillar);
-  }, [clearMessages, createConversation, selectedPillar]);
+  }, [clearMessages, createConversation, selectedPillar, summariseSession, activeConversationId]);
 
   // ── Switch to a conversation ──────────────────────────────────────────────
   const handleSelectConversation = useCallback(
     async (id: string) => {
       if (id === activeConversationId) return;
+      summariseSession(activeConversationId); // leaving the current session
       clearMessages();
       setActiveConversation(id);
       const msgs = await loadConversationMessages(id);
       useAppStore.setState({ messages: msgs });
     },
-    [activeConversationId, clearMessages, setActiveConversation, loadConversationMessages]
+    [activeConversationId, clearMessages, setActiveConversation, loadConversationMessages, summariseSession]
   );
 
   // ── Delete ────────────────────────────────────────────────────────────────
@@ -303,7 +362,15 @@ export default function TutorChat() {
                     onCancel={() => setRenamingId(null)}
                   />
                 ) : (
-                  <p className="text-[11px] truncate">{conv.title}</p>
+                  <>
+                    <p className="text-[11px] truncate">{conv.title}</p>
+                    {summarisedIds.has(conv.id) && (
+                      <span className="mt-0.5 inline-flex items-center gap-1 text-[9px] text-[#2E5FA3]/80">
+                        <FileText size={9} />
+                        Summary
+                      </span>
+                    )}
+                  </>
                 )}
               </div>
 
@@ -508,6 +575,9 @@ export default function TutorChat() {
               })()}
             </div>
           )}
+
+          {/* Existing session summary — read-only context at the top of the thread */}
+          {activeSummary && messages.length > 0 && <SummaryCard summary={activeSummary} />}
 
           <AnimatePresence initial={false}>
             {messages.map((msg) => (

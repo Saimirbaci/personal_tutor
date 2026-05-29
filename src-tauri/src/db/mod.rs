@@ -93,6 +93,19 @@ pub fn init(app: &AppHandle) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_review_items_due
             ON review_items(next_due);
+
+        CREATE TABLE IF NOT EXISTS conversation_summaries (
+            conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+            takeaways       TEXT NOT NULL,
+            reflection      TEXT NOT NULL,
+            flagged_items   TEXT NOT NULL,
+            model           TEXT,
+            created_at      TEXT NOT NULL,
+            updated_at      TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_conv_summary_created
+            ON conversation_summaries(created_at);
         ",
     )?;
 
