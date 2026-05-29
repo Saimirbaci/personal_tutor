@@ -22,12 +22,52 @@ pub struct ProviderInfo {
     pub base_url: Option<String>,
 }
 
-fn make_provider(config: ProviderConfig) -> Box<dyn AiProvider> {
+pub(crate) fn make_provider(config: ProviderConfig) -> Box<dyn AiProvider> {
     match config.provider.as_str() {
         "ollama" => Box::new(OllamaProvider::new(config)),
         "openrouter" => Box::new(OpenRouterProvider::new(config)),
         "google" => Box::new(GoogleProvider::new(config)),
         _ => Box::new(AnthropicProvider::new(config)),
+    }
+}
+
+/// Run an AI provider to completion, COLLECTING every token into a single String
+/// instead of emitting `ai-token`/`ai-done`/`ai-error` events.
+///
+/// This lets background tasks (session summaries, weekly digests) generate text
+/// concurrently with the live chat UI without clobbering its global event listeners.
+/// Bounded by `timeout_secs`.
+pub(crate) async fn collect_completion(
+    messages: Vec<AiMessage>,
+    system: Option<String>,
+    config: ProviderConfig,
+    timeout_secs: u64,
+) -> Result<String, String> {
+    let provider = make_provider(config);
+
+    let (tx, mut rx) = mpsc::channel::<String>(256);
+
+    // Collector task: concatenate every token into the final response.
+    let collector = tokio::spawn(async move {
+        let mut buf = String::new();
+        while let Some(token) = rx.recv().await {
+            buf.push_str(&token);
+        }
+        buf
+    });
+
+    let completion = provider.stream_completion(messages, system, tx);
+
+    match tokio::time::timeout(Duration::from_secs(timeout_secs), completion).await {
+        Ok(Ok(())) => collector.await.map_err(|e| e.to_string()),
+        Ok(Err(e)) => {
+            collector.abort();
+            Err(e.to_string())
+        }
+        Err(_) => {
+            collector.abort();
+            Err("AI generation timed out".to_string())
+        }
     }
 }
 
@@ -74,40 +114,12 @@ pub async fn summarize_conversation(
     system: Option<String>,
     config: ProviderConfig,
 ) -> Result<String, String> {
-    let provider = make_provider(config);
-
     let messages = vec![AiMessage {
         role: "user".to_string(),
         content: transcript,
     }];
 
-    let (tx, mut rx) = mpsc::channel::<String>(256);
-
-    // Collector task: concatenate every token into the final response.
-    let collector = tokio::spawn(async move {
-        let mut buf = String::new();
-        while let Some(token) = rx.recv().await {
-            buf.push_str(&token);
-        }
-        buf
-    });
-
-    let completion = provider.stream_completion(messages, system, tx);
-
-    match tokio::time::timeout(Duration::from_secs(45), completion).await {
-        Ok(Ok(())) => {
-            let text = collector.await.map_err(|e| e.to_string())?;
-            Ok(text)
-        }
-        Ok(Err(e)) => {
-            collector.abort();
-            Err(e.to_string())
-        }
-        Err(_) => {
-            collector.abort();
-            Err("Summary generation timed out".to_string())
-        }
-    }
+    collect_completion(messages, system, config, 45).await
 }
 
 #[tauri::command]

@@ -1,4 +1,4 @@
-import { Component, useEffect, type ReactNode } from 'react';
+import { Component, useEffect, useRef, type ReactNode } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -41,6 +41,7 @@ import Settings from '@/components/settings/Settings';
 import { useAppStore } from '@/store/appStore';
 import { useProgress } from '@/hooks/useProgress';
 import { runSessionSummary } from '@/hooks/useSessionSummary';
+import { useWeeklyDigest } from '@/hooks/useWeeklyDigest';
 import { tauriInvoke } from '@/lib/tauri';
 import type { ConversationListEntry } from '@/store/appStore';
 
@@ -52,13 +53,27 @@ const pageVariants = {
 
 export default function App() {
   const { loadProgress } = useProgress();
+  const { maybeGenerateDue, loadDigests } = useWeeklyDigest();
   const { currentView, activePillar } = useAppStore();
   const navigate = useNavigate();
   const location = useLocation();
+  const digestChecked = useRef(false);
 
   useEffect(() => {
     loadProgress();
   }, [loadProgress]);
+
+  // On-launch catch-up: generate any missing completed-week digest, then refresh
+  // the list so it appears in Progress without manual action. Idempotent on the
+  // backend (UNIQUE week_start); the ref guards against StrictMode double-mount.
+  useEffect(() => {
+    if (digestChecked.current) return;
+    digestChecked.current = true;
+    void (async () => {
+      await maybeGenerateDue();
+      await loadDigests();
+    })();
+  }, [maybeGenerateDue, loadDigests]);
 
   // ── Post-session summary: on-load retry + best-effort window-close trigger ──
   useEffect(() => {

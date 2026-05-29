@@ -6,6 +6,7 @@ import { formatHours, formatDateShort } from '@/lib/utils';
 import { ConversationSummary, PillarId } from '@/data/types';
 import { tauriInvoke } from '@/lib/tauri';
 import SummaryCard from '@/components/SummaryCard';
+import WeeklyDigestCard from '@/components/progress/WeeklyDigestCard';
 
 interface SummaryRow {
   conversationId: string;
@@ -81,6 +82,9 @@ export default function ProgressView() {
             </p>
           </div>
         </motion.div>
+
+        {/* Weekly digest */}
+        <WeeklyDigestCard />
 
         {/* Recent session summaries */}
         <motion.div
