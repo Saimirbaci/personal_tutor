@@ -34,7 +34,7 @@ Two access patterns coexist — pick one consistently per command file:
 Rules that apply to both:
 - Use parameterized queries exclusively: `params![val1, val2]`
 - Handle `rusqlite::Error::QueryReturnedNoRows` explicitly (map to `None` or 404)
-- Tables: `sessions`, `milestones`, `settings`, `conversations`, `chat_messages`, `review_items`
+- Tables: `sessions`, `milestones`, `settings`, `conversations`, `chat_messages`, `review_items`, `conversation_summaries`
 
 ```rust
 // Good — brief lock, no await while holding

@@ -31,6 +31,7 @@ Rust Backend (Tauri v2 + rusqlite + Tokio)
     │   ├── conversations.rs → CRUD + bulk_import_sync
     │   ├── progress.rs      → log_session, get_progress, get_streak, update_milestone
     │   ├── review.rs        → SM-2 spaced repetition (record_review_attempt, get_due_reviews, get_review_counts)
+    │   ├── summaries.rs     → save_conversation_summary, get_conversation_summary, list_recent_summaries, seed_review_items_from_summary
     │   ├── schedule.rs      → get_today_schedule, schedule_notification
     │   ├── sync_server.rs   → Axum-based local sync server (start/stop/status)
     │   └── voice.rs         → STT model management, transcribe_audio, ElevenLabs TTS
@@ -66,10 +67,12 @@ All AI responses stream via Tauri events — never polled:
 
 The `useAI` hook in `src/hooks/useAI.ts` handles event subscriptions and calls the `stream_chat` Tauri command.
 
+Background summaries use `summarize_conversation` (in `ai.rs`), which buffers tokens silently and returns the final text without emitting `ai-token`/`ai-done`/`ai-error` events. This allows summaries to run concurrently with live chat without interfering with the streaming UI.
+
 ## State Management
 Single Zustand store in `src/store/appStore.ts` with `persist` middleware.
 Persisted keys: `providerConfig`, `voiceConfig`, `sidebarCollapsed`, `activePillar`.
-Ephemeral: all messages, streaming state, conversation list, progress data.
+Ephemeral: all messages, streaming state, conversation list, progress data, `pendingPrompt` (queued reflection reply).
 
 ## Database (rusqlite)
 SQLite at `{app_data_dir}/tutor.db`. WAL mode, foreign keys ON.
@@ -78,6 +81,7 @@ SQLite at `{app_data_dir}/tutor.db`. WAL mode, foreign keys ON.
 - **`conversations`** — chat conversation metadata (pillar, title)
 - **`chat_messages`** — individual messages (role, content, genui JSON)
 - **`review_items`** — SM-2 spaced repetition state (item_id, item_type, pillar, ease_factor, interval_days, repetitions, next_due)
+- **`conversation_summaries`** — post-session summary notes (takeaways, reflection, flagged review items, model, timestamps)
 - **`settings`** — key/value store
 
 Two DB access patterns coexist:
@@ -102,7 +106,7 @@ Default: `anthropic / claude-sonnet-4-5`.
 
 ## Key Types
 All TypeScript interfaces in `src/data/types.ts`. Match Rust serde structs exactly (camelCase).
-Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`.
+Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`, `ConversationSummary`, `FlaggedReviewItem`, `SessionSummaryData`.
 
 ## Spaced Repetition
 SM-2 algorithm in `src-tauri/src/commands/review.rs`. Quality grades 0–5 (≥3 passes). Failed reviews reset interval to 1 day; ease factor floored at 1.3.
@@ -110,6 +114,16 @@ SM-2 algorithm in `src-tauri/src/commands/review.rs`. Quality grades 0–5 (≥3
 - Item IDs derived deterministically via `buildReviewItemId(type, pillar, question)` (djb2 hash) so the same flashcard/quiz across sessions maps to one review row
 - `Flashcard` and `Quiz` GenUI renderers call `recordAttempt` on user interaction
 - `ReviewWidget` on the Dashboard surfaces due-count
+
+## Post-Session Summaries
+AI-generated structured notes at the end of each chat session, capturing key takeaways, a reflection question, and flagged flashcards/quizzes for spaced repetition.
+- Frontend hook: `useSessionSummary` — calls `runSessionSummary(conversationId)` to generate/fetch summary
+- Read-only hook: `useConversationSummary(conversationId)` — displays existing summary with loading state
+- Tauri commands: `get_conversation_summary`, `save_conversation_summary`, `list_recent_summaries`, `seed_review_items_from_summary` (in `summaries.rs`); `summarize_conversation` (in `ai.rs`)
+- Zustand: `pendingPrompt` state + `setPendingPrompt` action for queuing reflection replies
+- Automatic triggers: window close (beforeunload), conversation switch, new conversation, startup backfill
+- UI: `SummaryCard` component renders takeaways/reflection/flagged items, shown in ProgressView and at top of active conversation
+- Prompt: `SESSION_SUMMARY_PROMPT` in `src/lib/genui.ts` instructs the model to emit a single `<genui type="session-summary">` block
 
 ## Tauri IPC Layer
 `src/lib/tauri.ts` provides `tauriInvoke()` and `tauriListen()` wrappers with browser fallback mocks for dev server testing without full Tauri.
