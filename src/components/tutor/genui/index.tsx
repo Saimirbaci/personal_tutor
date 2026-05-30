@@ -1,6 +1,8 @@
 import { Component, type ReactNode } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { GenUIBlock, PillarId } from '@/data/types';
+import { ConversationSummary, GenUIBlock, PillarId, SessionSummaryData } from '@/data/types';
+import { useAppStore } from '@/store/appStore';
+import SummaryCard from '@/components/SummaryCard';
 import Diagram from './Diagram';
 import Flashcard from './Flashcard';
 import Quiz from './Quiz';
@@ -8,6 +10,27 @@ import CodeBlock from './CodeBlock';
 import ConceptMap from './ConceptMap';
 import Timeline from './Timeline';
 import KeyInsight from './KeyInsight';
+
+/** Adapts an inline session-summary block into a SummaryCard for the active conversation. */
+function SessionSummaryRenderer({ data, pillar }: { data: SessionSummaryData; pillar?: PillarId | null }) {
+  const activeConversationId = useAppStore((s) => s.activeConversationId);
+  const now = new Date().toISOString();
+  const summary: ConversationSummary = {
+    conversationId: activeConversationId ?? '',
+    takeaways: data.takeaways ?? [],
+    reflection: data.reflection ?? '',
+    flaggedItems: (data.flaggedItems ?? []).map((it) => ({
+      type: it.type,
+      pillar: it.pillar ?? null,
+      question: it.question,
+      reviewItemId: it.reviewItemId ?? '',
+    })),
+    createdAt: now,
+    updatedAt: now,
+    conversationPillar: pillar ?? null,
+  };
+  return <SummaryCard summary={summary} defaultOpen />;
+}
 
 // ── Per-block error boundary ───────────────────────────────────────────────
 interface BoundaryState { error: Error | null }
@@ -99,6 +122,9 @@ function BlockContent({ block, pillar }: GenUIRendererProps) {
 
     case 'key-insight':
       return <KeyInsight text={block.data as string} pillar={pillar} />;
+
+    case 'session-summary':
+      return <SessionSummaryRenderer data={block.data as SessionSummaryData} pillar={pillar} />;
 
     default:
       return null;

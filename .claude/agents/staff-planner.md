@@ -15,18 +15,21 @@ Produce clear, phased implementation plans that account for the full stack. Neve
 **Backend (Rust, `src-tauri/src/`):**
 - `lib.rs` — registers all plugins and Tauri commands. Every new command must be added here.
 - `db/mod.rs` — `DbState(Mutex<Connection>)`, WAL mode, schema initialization. New tables go in the `execute_batch()` call.
-- `commands/ai.rs` — AI streaming: `stream_chat`, provider listing, `save_provider_config`
+- `commands/ai.rs` — AI streaming: `stream_chat`, provider listing, `save_provider_config`; `collect_completion`/`make_provider` helpers (`pub(crate)`) for background AI work
 - `commands/conversations.rs` — conversation CRUD + `bulk_import_sync`
 - `commands/progress.rs` — `log_session`, `get_progress`, `get_streak`, `update_milestone`
+- `commands/review.rs` — SM-2 spaced repetition: `record_review_attempt`, `get_due_reviews`, `get_review_counts` (uses per-call `db::get_connection`)
+- `commands/summaries.rs` — post-session summaries: `save_conversation_summary`, `get_conversation_summary`, `list_recent_summaries`, `seed_review_items_from_summary`
+- `commands/digest.rs` — weekly digest: `generate_weekly_digest`, `get_weekly_digests`, `maybe_generate_due_digest`, `export_weekly_digest` (per-call `db::get_connection` + `collect_completion`)
 - `commands/schedule.rs` — `get_today_schedule`, `schedule_notification`
 - `commands/sync_server.rs` — Axum sync server start/stop/status
 - `commands/voice.rs` — STT model management, `transcribe_audio`, `tts_elevenlabs`, `get_elevenlabs_voices`
 - `ai/provider.rs` — `AiProvider` async_trait; providers: `anthropic.rs`, `google.rs`, `ollama.rs`, `openrouter.rs`
 
 **Frontend (React + TS, `src/`):**
-- `store/appStore.ts` — single Zustand store. New state/actions must be added to `AppState` interface AND the store impl
+- `store/appStore.ts` — single Zustand store. New state/actions must be added to `AppState` interface AND the store impl. Persisted: `providerConfig`, `voiceConfig`, `sidebarCollapsed`, `activePillar`. Backend-loaded data (e.g. `weeklyDigests`) stays ephemeral.
 - `data/types.ts` — all shared TypeScript interfaces. New types here first.
-- `hooks/useAI.ts` — AI streaming hook, event subscriptions to `ai-token`/`ai-done`/`ai-error`
+- `hooks/` — all Tauri calls live in hooks, never in components: `useAI` (streaming), `useVoice`, `useProgress`, `useReview`, `useSessionSummary`, `useConversationSummary`, `useWeeklyDigest`, `usePlan`, `useConversations`, `useMobile`
 - `lib/tauri.ts` — `tauriInvoke<T>()` and `tauriListen<T>()` wrappers used in hooks
 
 **Critical Constraints:**

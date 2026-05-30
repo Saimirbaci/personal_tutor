@@ -11,6 +11,7 @@
 - All AI streaming state lives in the store: `messages`, `isStreaming`, `streamingContent`, `currentToken`
 - Never store derived data in the store — compute with selectors
 - Persisted keys: `providerConfig`, `voiceConfig`, `sidebarCollapsed`, `activePillar`
+- Ephemeral keys loaded from the backend (never persisted): `weeklyDigests`, `selectedDigestWeek` (owned by `useWeeklyDigest`)
 - Use `useAppStore` hook — always select only what the component needs:
 
 ```typescript
@@ -42,13 +43,17 @@ useEffect(() => {
 - AI interactions: `useAI` — builds system prompt, calls `stream_chat`, manages Tauri event subscriptions
 - Voice: `useVoice` — calls `transcribe_audio`, `tts_elevenlabs`, model status/download
 - Progress: `useProgress` — calls `log_session`, `get_progress`, `get_streak`
+- Session summaries: `useSessionSummary` (imperative, triggers summary generation), `useConversationSummary` (read-only, displays existing summary)
+- Weekly digests: `useWeeklyDigest` — `loadDigests`, `generate`, `maybeGenerateDue` (on-launch catch-up), `exportDigest`; owns all digest Tauri calls and writes to the ephemeral `weeklyDigests` store state
 - Never call `tauriInvoke` directly inside React components
 
 ## Types
 - All shared TypeScript interfaces in `src/data/types.ts` — single source of truth
 - Mirror Rust serde structs exactly (camelCase after `#[serde(rename_all = "camelCase")]`)
 - Use `PillarId` type everywhere — never raw strings for pillar identifiers
-- `GenUIBlock.type` is a discriminated union — use it in switch statements
+- `GenUIBlock.type` is a discriminated union (now includes 'session-summary') — use it in switch statements
+- `ConversationSummary` — AI-generated session notes (takeaways, reflection, flagged items); `SessionSummaryData` — model-emitted GenUI payload
+- `WeeklyDigest` — auto-generated weekly report (`weekStart`/`weekEnd` as `YYYY-MM-DD`, `weekNumber`, markdown `content`, `metrics`, `createdAt`); `DigestMetrics` — computed stats (`totalHours`, `hoursByPillar`, `sessionsCount`, `streak`, `pillarsCovered`, `topGaps`, `recommendedFocus`). Both mirror the Rust structs in `digest.rs`.
 
 ```typescript
 // GenUI rendering pattern
@@ -60,7 +65,8 @@ switch (block.type) {
 ```
 
 ## Styling (Tailwind v3)
-- Tailwind utility classes exclusively — no inline styles, no CSS modules
+- Tailwind utility classes exclusively — no CSS modules or component-scoped CSS files
+- Inline styles allowed only for dynamic values (e.g. pillar colors from data) that cannot be expressed as Tailwind utility classes
 - Dark mode: use `dark:` prefix classes (Tailwind dark mode configured)
 - Animation: Framer Motion for transitions — not CSS keyframes
 - Pillar colors are defined in `src/data/pillars.ts` as `Pillar.color` and `Pillar.colorMuted`

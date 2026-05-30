@@ -89,7 +89,15 @@ export interface AiMessage {
 }
 
 export interface GenUIBlock {
-  type: 'diagram' | 'flashcard' | 'quiz' | 'code' | 'concept-map' | 'timeline' | 'key-insight';
+  type:
+    | 'diagram'
+    | 'flashcard'
+    | 'quiz'
+    | 'code'
+    | 'concept-map'
+    | 'timeline'
+    | 'key-insight'
+    | 'session-summary';
   data: unknown;
 }
 
@@ -227,4 +235,69 @@ export interface MorningBriefing {
   reviewCounts: ReviewCounts;
   headline: string;
   notificationBody: string;
+}
+
+// ── Post-Session Summaries ──────────────────────────────────────────────────
+
+/** A flashcard/quiz flagged by the summary for spaced repetition. */
+export interface FlaggedReviewItem {
+  type: ReviewItemType;
+  pillar: PillarId | null;
+  question: string;
+  /** Deterministic review id (mirrors buildReviewItemId) once seeded. */
+  reviewItemId: string;
+}
+
+/** Structured note generated at the end of a chat session, attached to a conversation. */
+export interface ConversationSummary {
+  conversationId: string;
+  /** Exactly 3 key takeaways. */
+  takeaways: string[];
+  /** A single open reflection question. */
+  reflection: string;
+  flaggedItems: FlaggedReviewItem[];
+  /** Provider/model that generated the summary, e.g. "anthropic/claude-sonnet-4-5". */
+  model?: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Joined from the conversation row for list rendering (optional). */
+  conversationTitle?: string;
+  conversationPillar?: PillarId | null;
+}
+
+/** The JSON payload the model emits inside a <genui type="session-summary"> block. */
+export type SessionSummaryData = Pick<
+  ConversationSummary,
+  'takeaways' | 'reflection'
+> & {
+  flaggedItems: Array<Omit<FlaggedReviewItem, 'reviewItemId'> & { reviewItemId?: string }>;
+};
+
+// ── Weekly Digest ────────────────────────────────────────────────────────────
+
+/** Computed (non-AI) metrics that ground a weekly digest. Mirrors Rust DigestMetrics. */
+export interface DigestMetrics {
+  totalHours: number;
+  hoursByPillar: Record<string, number>;
+  sessionsCount: number;
+  streak: number;
+  pillarsCovered: string[];
+  /** Weak review items reviewed this week (knowledge gaps). */
+  topGaps: string[];
+  /** Rule-based pillar ids recommended for next week. */
+  recommendedFocus: string[];
+}
+
+/** An auto-generated weekly learning summary. Mirrors Rust WeeklyDigest. */
+export interface WeeklyDigest {
+  /** Monday of the week (YYYY-MM-DD) — the stable key. */
+  weekStart: string;
+  /** Sunday of the week (YYYY-MM-DD). */
+  weekEnd: string;
+  /** Sprint week number (1–12). */
+  weekNumber: number;
+  /** AI-generated markdown report. */
+  content: string;
+  metrics: DigestMetrics;
+  createdAt: string;
 }

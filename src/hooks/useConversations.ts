@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { tauriInvoke } from '@/lib/tauri';
-import { useAppStore, ConversationSummary } from '@/store/appStore';
+import { useAppStore, ConversationListEntry } from '@/store/appStore';
 import { AiMessage, GenUIBlock, PillarId } from '@/data/types';
 
 interface StoredMessage {
@@ -25,7 +25,7 @@ export function useConversations() {
   // ── Load the full list of conversations ───────────────────────────────────
   const loadConversationList = useCallback(async () => {
     try {
-      const list = await tauriInvoke<ConversationSummary[]>('list_conversations');
+      const list = await tauriInvoke<ConversationListEntry[]>('list_conversations');
       setConversationList(list);
       return list;
     } catch (err) {
@@ -42,7 +42,7 @@ export function useConversations() {
         title: title ?? null,
       });
 
-      const summary: ConversationSummary = {
+      const summary: ConversationListEntry = {
         id,
         title: title ?? 'New conversation',
         pillar: pillar ?? null,

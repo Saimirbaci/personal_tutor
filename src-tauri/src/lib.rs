@@ -2,7 +2,7 @@ pub mod ai;
 pub mod commands;
 pub mod db;
 
-use commands::{ai as ai_cmd, conversations as conv_cmd, progress, review, schedule, sync_server as sync_cmd, voice as voice_cmd};
+use commands::{ai as ai_cmd, conversations as conv_cmd, digest as digest_cmd, progress, review, schedule, summaries as summary_cmd, sync_server as sync_cmd, voice as voice_cmd};
 use sync_cmd::SyncServerHandle;
 use tauri::Manager;
 use tokio::sync::Mutex;
@@ -38,9 +38,18 @@ pub fn run() {
             review::record_review_attempt,
             review::get_due_reviews,
             review::get_review_counts,
+            summary_cmd::save_conversation_summary,
+            summary_cmd::get_conversation_summary,
+            summary_cmd::list_recent_summaries,
+            summary_cmd::seed_review_items_from_summary,
+            ai_cmd::summarize_conversation,
             schedule::get_today_schedule,
             schedule::schedule_notification,
             schedule::get_morning_briefing,
+            digest_cmd::generate_weekly_digest,
+            digest_cmd::get_weekly_digests,
+            digest_cmd::maybe_generate_due_digest,
+            digest_cmd::export_weekly_digest,
             sync_cmd::start_sync_server,
             sync_cmd::stop_sync_server,
             sync_cmd::get_sync_server_status,

@@ -1,4 +1,4 @@
-import { Component, useEffect, type ReactNode } from 'react';
+import { Component, useEffect, useRef, type ReactNode } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -40,6 +40,10 @@ import ProgressView from '@/components/progress/ProgressView';
 import Settings from '@/components/settings/Settings';
 import { useAppStore } from '@/store/appStore';
 import { useProgress } from '@/hooks/useProgress';
+import { runSessionSummary } from '@/hooks/useSessionSummary';
+import { useWeeklyDigest } from '@/hooks/useWeeklyDigest';
+import { tauriInvoke } from '@/lib/tauri';
+import type { ConversationListEntry } from '@/store/appStore';
 
 const pageVariants = {
   initial: { opacity: 0, y: 8 },
@@ -49,13 +53,61 @@ const pageVariants = {
 
 export default function App() {
   const { loadProgress } = useProgress();
+  const { maybeGenerateDue, loadDigests } = useWeeklyDigest();
   const { currentView, activePillar } = useAppStore();
   const navigate = useNavigate();
   const location = useLocation();
+  const digestChecked = useRef(false);
 
   useEffect(() => {
     loadProgress();
   }, [loadProgress]);
+
+  // On-launch catch-up: generate any missing completed-week digest, then refresh
+  // the list so it appears in Progress without manual action. Idempotent on the
+  // backend (UNIQUE week_start); the ref guards against StrictMode double-mount.
+  useEffect(() => {
+    if (digestChecked.current) return;
+    digestChecked.current = true;
+    void (async () => {
+      await maybeGenerateDue();
+      await loadDigests();
+    })();
+  }, [maybeGenerateDue, loadDigests]);
+
+  // ── Post-session summary: on-load retry + best-effort window-close trigger ──
+  useEffect(() => {
+    // Best-effort: summarise the open conversation when the window/app closes.
+    const onBeforeUnload = () => {
+      const id = useAppStore.getState().activeConversationId;
+      if (id) void runSessionSummary(id); // fire-and-forget; not awaited
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+
+    // On launch, backfill summaries for recent conversations that have messages
+    // but no summary row (e.g. the app was closed mid-session last time).
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await tauriInvoke<ConversationListEntry[]>('list_conversations');
+        if (cancelled) return;
+        const candidates = list
+          .filter((c) => c.message_count >= 4)
+          .slice(0, 3); // cap work on launch
+        for (const c of candidates) {
+          if (cancelled) break;
+          void runSessionSummary(c.id); // short-circuits if a summary already exists
+        }
+      } catch (err) {
+        console.error('summary backfill failed:', err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('beforeunload', onBeforeUnload);
+    };
+  }, []);
 
   // Sync store navigation with router
   useEffect(() => {
