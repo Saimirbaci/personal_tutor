@@ -40,6 +40,7 @@ pub fn run() {
             review::get_review_counts,
             schedule::get_today_schedule,
             schedule::schedule_notification,
+            schedule::get_morning_briefing,
             sync_cmd::start_sync_server,
             sync_cmd::stop_sync_server,
             sync_cmd::get_sync_server_status,

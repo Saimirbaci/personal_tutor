@@ -78,7 +78,8 @@ personal_tutor/
         │   │                         rename_conversation, bulk_import_sync
         │   ├── progress.rs        ← log_session, get_progress, get_streak, update_milestone
         │   ├── review.rs          ← SM-2: record_review_attempt, get_due_reviews, get_review_counts
-        │   ├── schedule.rs        ← get_today_schedule, schedule_notification
+        │   ├── schedule.rs        ← get_today_schedule, schedule_notification,
+        │   │                         get_morning_briefing (aggregates schedule + streak + reviews)
         │   ├── sync_server.rs     ← start_sync_server, stop_sync_server, get_sync_server_status
         │   └── voice.rs           ← get_stt_model_status, download_stt_model,
         │                             transcribe_audio, tts_elevenlabs, get_elevenlabs_voices
