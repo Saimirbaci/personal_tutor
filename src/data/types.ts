@@ -259,3 +259,32 @@ export type SessionSummaryData = Pick<
 > & {
   flaggedItems: Array<Omit<FlaggedReviewItem, 'reviewItemId'> & { reviewItemId?: string }>;
 };
+
+// ── Weekly Digest ────────────────────────────────────────────────────────────
+
+/** Computed (non-AI) metrics that ground a weekly digest. Mirrors Rust DigestMetrics. */
+export interface DigestMetrics {
+  totalHours: number;
+  hoursByPillar: Record<string, number>;
+  sessionsCount: number;
+  streak: number;
+  pillarsCovered: string[];
+  /** Weak review items reviewed this week (knowledge gaps). */
+  topGaps: string[];
+  /** Rule-based pillar ids recommended for next week. */
+  recommendedFocus: string[];
+}
+
+/** An auto-generated weekly learning summary. Mirrors Rust WeeklyDigest. */
+export interface WeeklyDigest {
+  /** Monday of the week (YYYY-MM-DD) — the stable key. */
+  weekStart: string;
+  /** Sunday of the week (YYYY-MM-DD). */
+  weekEnd: string;
+  /** Sprint week number (1–12). */
+  weekNumber: number;
+  /** AI-generated markdown report. */
+  content: string;
+  metrics: DigestMetrics;
+  createdAt: string;
+}

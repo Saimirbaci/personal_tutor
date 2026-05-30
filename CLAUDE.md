@@ -32,6 +32,7 @@ Rust Backend (Tauri v2 + rusqlite + Tokio)
     │   ├── progress.rs      → log_session, get_progress, get_streak, update_milestone
     │   ├── review.rs        → SM-2 spaced repetition (record_review_attempt, get_due_reviews, get_review_counts)
     │   ├── summaries.rs     → save_conversation_summary, get_conversation_summary, list_recent_summaries, seed_review_items_from_summary
+    │   ├── digest.rs        → weekly digest (generate_weekly_digest, get_weekly_digests, maybe_generate_due_digest, export_weekly_digest)
     │   ├── schedule.rs      → get_today_schedule, schedule_notification
     │   ├── sync_server.rs   → Axum-based local sync server (start/stop/status)
     │   └── voice.rs         → STT model management, transcribe_audio, ElevenLabs TTS
@@ -67,12 +68,12 @@ All AI responses stream via Tauri events — never polled:
 
 The `useAI` hook in `src/hooks/useAI.ts` handles event subscriptions and calls the `stream_chat` Tauri command.
 
-Background summaries use `summarize_conversation` (in `ai.rs`), which buffers tokens silently and returns the final text without emitting `ai-token`/`ai-done`/`ai-error` events. This allows summaries to run concurrently with live chat without interfering with the streaming UI.
+Background AI tasks (session summaries, weekly digests) use the shared `collect_completion(messages, system, config, timeout_secs)` helper in `ai.rs`, which buffers tokens silently and returns the final text without emitting `ai-token`/`ai-done`/`ai-error` events. This allows them to run concurrently with live chat without interfering with the streaming UI. `summarize_conversation` (in `ai.rs`) is a thin wrapper over `collect_completion`.
 
 ## State Management
 Single Zustand store in `src/store/appStore.ts` with `persist` middleware.
 Persisted keys: `providerConfig`, `voiceConfig`, `sidebarCollapsed`, `activePillar`.
-Ephemeral: all messages, streaming state, conversation list, progress data, `pendingPrompt` (queued reflection reply).
+Ephemeral: all messages, streaming state, conversation list, progress data, `pendingPrompt` (queued reflection reply), `weeklyDigests` + `selectedDigestWeek` (digest list and UI selection, never persisted).
 
 ## Database (rusqlite)
 SQLite at `{app_data_dir}/tutor.db`. WAL mode, foreign keys ON.
@@ -82,11 +83,12 @@ SQLite at `{app_data_dir}/tutor.db`. WAL mode, foreign keys ON.
 - **`chat_messages`** — individual messages (role, content, genui JSON)
 - **`review_items`** — SM-2 spaced repetition state (item_id, item_type, pillar, ease_factor, interval_days, repetitions, next_due)
 - **`conversation_summaries`** — post-session summary notes (takeaways, reflection, flagged review items, model, timestamps)
+- **`weekly_digests`** — auto-generated weekly learning summaries (week_start UNIQUE, week_end, week_number, content, metrics JSON, created_at); index `idx_weekly_digests_week_start` on `week_start DESC`
 - **`settings`** — key/value store
 
 Two DB access patterns coexist:
 - `DbState(Mutex<Connection>)` — shared connection, locked per call (used by most commands)
-- `db::get_connection(&app)` — opens a fresh `rusqlite::Connection` per call (used by `review.rs`); safe under WAL but bypasses the shared mutex
+- `db::get_connection(&app)` — opens a fresh `rusqlite::Connection` per call (used by `review.rs`, `digest.rs`); safe under WAL but bypasses the shared mutex
 
 ## Sync Server
 Axum HTTP server on a local port (start/stop via Tauri commands). Used to sync conversations from mobile/web to desktop. `SyncServerHandle(Mutex<Option<...>>)` managed as Tauri app state.
@@ -106,7 +108,7 @@ Default: `anthropic / claude-sonnet-4-5`.
 
 ## Key Types
 All TypeScript interfaces in `src/data/types.ts`. Match Rust serde structs exactly (camelCase).
-Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`, `ConversationSummary`, `FlaggedReviewItem`, `SessionSummaryData`.
+Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`, `ConversationSummary`, `FlaggedReviewItem`, `SessionSummaryData`, `WeeklyDigest`, `DigestMetrics`.
 
 ## Spaced Repetition
 SM-2 algorithm in `src-tauri/src/commands/review.rs`. Quality grades 0–5 (≥3 passes). Failed reviews reset interval to 1 day; ease factor floored at 1.3.
@@ -124,6 +126,16 @@ AI-generated structured notes at the end of each chat session, capturing key tak
 - Automatic triggers: window close (beforeunload), conversation switch, new conversation, startup backfill
 - UI: `SummaryCard` component renders takeaways/reflection/flagged items, shown in ProgressView and at top of active conversation
 - Prompt: `SESSION_SUMMARY_PROMPT` in `src/lib/genui.ts` instructs the model to emit a single `<genui type="session-summary">` block
+
+## Weekly Digest
+Auto-generated weekly learning report covering session stats, pillar mastery deltas, knowledge gaps, and AI-written recommendations for the next week.
+- Frontend hook: `useWeeklyDigest` — `loadDigests(limit=12)`, `generate(weekStart?)`, `maybeGenerateDue()` (on-launch catch-up), `exportDigest(weekStart)` (markdown export to disk)
+- Tauri commands (in `digest.rs`): `generate_weekly_digest`, `get_weekly_digests`, `maybe_generate_due_digest`, `export_weekly_digest`. Uses the per-call `db::get_connection(&app)` pattern (like `review.rs`) and the `collect_completion` helper for AI generation; `export_weekly_digest` writes via `tokio::fs::write`.
+- Database: `weekly_digests` table keyed by `week_start` (Monday, `UNIQUE`); `metrics` is a JSON blob of `DigestMetrics` (totalHours, hoursByPillar, sessionsCount, streak, pillarsCovered, topGaps, recommendedFocus)
+- Week boundaries: Monday–Sunday; `most_recent_completed_week()` treats Sunday as the completion trigger. Sprint week number 1–12 aligns with `schedule.rs::get_week_number` (sprint start 2026-06-01)
+- Zustand ephemeral state: `weeklyDigests` (list) + `selectedDigestWeek` (UI selection); actions `setWeeklyDigests` / `setSelectedDigestWeek` — never persisted
+- UI: `WeeklyDigestCard` component (in `src/components/progress/`, rendered by `ProgressView`) shows the digest markdown, a past-week selector, and regenerate/export controls
+- Automatic trigger: App.tsx on-launch effect calls `maybeGenerateDue()` then `loadDigests()`, guarded by a `useRef` against StrictMode double-mount. Idempotent on the backend via `UNIQUE(week_start)`
 
 ## Tauri IPC Layer
 `src/lib/tauri.ts` provides `tauriInvoke()` and `tauriListen()` wrappers with browser fallback mocks for dev server testing without full Tauri.

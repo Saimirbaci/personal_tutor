@@ -86,6 +86,10 @@ function getMockData<T>(cmd: string, _args?: Record<string, unknown>): Promise<T
     save_conversation_summary: null,
     seed_review_items_from_summary: [],
     summarize_conversation: '',
+    get_weekly_digests: [],
+    maybe_generate_due_digest: null,
+    generate_weekly_digest: null,
+    export_weekly_digest: '',
   };
 
   return Promise.resolve((mocks[cmd] ?? null) as T);

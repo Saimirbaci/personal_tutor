@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { AiMessage, PillarId, ProgressData, ProviderConfig, VoiceConfig } from '@/data/types';
+import { AiMessage, PillarId, ProgressData, ProviderConfig, VoiceConfig, WeeklyDigest } from '@/data/types';
 
 /** A lightweight conversation row used in the sidebar/history list.
  *  (Distinct from the AI-generated `ConversationSummary` note in data/types.ts.) */
@@ -37,6 +37,10 @@ interface AppState {
   progress: ProgressData | null;
   streak: number;
 
+  // Weekly digests (ephemeral — loaded from backend, never persisted)
+  weeklyDigests: WeeklyDigest[];
+  selectedDigestWeek: string | null;
+
   // Voice
   voiceConfig: VoiceConfig;
 
@@ -58,6 +62,8 @@ interface AppState {
   removeConversation: (id: string) => void;
   setProgress: (p: ProgressData) => void;
   setStreak: (s: number) => void;
+  setWeeklyDigests: (d: WeeklyDigest[]) => void;
+  setSelectedDigestWeek: (weekStart: string | null) => void;
   setProviderConfig: (c: ProviderConfig) => void;
   toggleSidebar: () => void;
   setMobileSidebarOpen: (open: boolean) => void;
@@ -87,6 +93,9 @@ export const useAppStore = create<AppState>()(
 
       progress: null,
       streak: 0,
+
+      weeklyDigests: [],
+      selectedDigestWeek: null,
 
       voiceConfig: {
         enabled: false,
@@ -167,6 +176,8 @@ export const useAppStore = create<AppState>()(
 
       setProgress: (p) => set({ progress: p }),
       setStreak: (s) => set({ streak: s }),
+      setWeeklyDigests: (d) => set({ weeklyDigests: d }),
+      setSelectedDigestWeek: (weekStart) => set({ selectedDigestWeek: weekStart }),
       setProviderConfig: (c) => set({ providerConfig: c }),
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
       setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),

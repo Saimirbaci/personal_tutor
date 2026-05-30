@@ -106,6 +106,19 @@ pub fn init(app: &AppHandle) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_conv_summary_created
             ON conversation_summaries(created_at);
+
+        CREATE TABLE IF NOT EXISTS weekly_digests (
+            id          TEXT PRIMARY KEY,
+            week_start  TEXT NOT NULL UNIQUE,
+            week_end    TEXT NOT NULL,
+            week_number INTEGER NOT NULL,
+            content     TEXT NOT NULL,
+            metrics     TEXT NOT NULL,
+            created_at  TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_weekly_digests_week_start
+            ON weekly_digests(week_start DESC);
         ",
     )?;
 
