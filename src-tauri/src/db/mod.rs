@@ -93,6 +93,24 @@ pub fn init(app: &AppHandle) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_review_items_due
             ON review_items(next_due);
+
+        CREATE TABLE IF NOT EXISTS knowledge_gaps (
+            gap_id            TEXT PRIMARY KEY,
+            pillar            TEXT NOT NULL,
+            topic_key         TEXT NOT NULL,
+            label             TEXT NOT NULL,
+            severity          REAL NOT NULL,
+            signal_summary    TEXT NOT NULL,
+            status            TEXT NOT NULL DEFAULT 'open',
+            first_detected_at TEXT NOT NULL,
+            last_updated_at   TEXT NOT NULL,
+            dismissed_until   TEXT,
+            last_drilled_at   TEXT,
+            UNIQUE(pillar, topic_key)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_knowledge_gaps_pillar
+            ON knowledge_gaps(pillar, status);
         ",
     )?;
 

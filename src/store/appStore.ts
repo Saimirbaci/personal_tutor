@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { AiMessage, PillarId, ProgressData, ProviderConfig, VoiceConfig } from '@/data/types';
+import { AiMessage, KnowledgeGap, PillarId, ProgressData, ProviderConfig, VoiceConfig } from '@/data/types';
 
 export interface ConversationSummary {
   id: string;
@@ -33,6 +33,12 @@ interface AppState {
   progress: ProgressData | null;
   streak: number;
 
+  // Knowledge gaps (ephemeral — recomputed from live signals, never persisted)
+  knowledgeGaps: KnowledgeGap[] | null;
+
+  // A drill prompt to auto-send when the tutor view next opens (ephemeral)
+  pendingPrompt: string | null;
+
   // Voice
   voiceConfig: VoiceConfig;
 
@@ -53,6 +59,8 @@ interface AppState {
   removeConversation: (id: string) => void;
   setProgress: (p: ProgressData) => void;
   setStreak: (s: number) => void;
+  setKnowledgeGaps: (gaps: KnowledgeGap[]) => void;
+  setPendingPrompt: (prompt: string | null) => void;
   setProviderConfig: (c: ProviderConfig) => void;
   toggleSidebar: () => void;
   setMobileSidebarOpen: (open: boolean) => void;
@@ -81,6 +89,8 @@ export const useAppStore = create<AppState>()(
 
       progress: null,
       streak: 0,
+      knowledgeGaps: null,
+      pendingPrompt: null,
 
       voiceConfig: {
         enabled: false,
@@ -160,6 +170,8 @@ export const useAppStore = create<AppState>()(
 
       setProgress: (p) => set({ progress: p }),
       setStreak: (s) => set({ streak: s }),
+      setKnowledgeGaps: (gaps) => set({ knowledgeGaps: gaps }),
+      setPendingPrompt: (prompt) => set({ pendingPrompt: prompt }),
       setProviderConfig: (c) => set({ providerConfig: c }),
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
       setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),

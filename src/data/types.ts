@@ -215,3 +215,30 @@ export interface ReviewCounts {
   due: number;
   dueToday: number;
 }
+
+// ── Knowledge Gaps ────────────────────────────────────────────────────────────
+
+export type GapSignalKind = 'weak_quiz' | 'low_ease' | 'shallow_chat' | 'stale';
+
+export interface GapSignal {
+  kind: GapSignalKind;
+  detail: string;
+  weight: number;
+}
+
+export type GapStatus = 'open' | 'dismissed' | 'resolved';
+
+export interface KnowledgeGap {
+  gapId: string;
+  pillar: PillarId;
+  topicKey: string;
+  label: string;
+  /** Combined severity 0–1, higher = more attention needed. */
+  severity: number;
+  signals: GapSignal[];
+  status: GapStatus;
+  firstDetectedAt: string;
+  lastUpdatedAt: string;
+  dismissedUntil: string | null;
+  lastDrilledAt: string | null;
+}
