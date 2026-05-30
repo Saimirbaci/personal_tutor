@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Zap } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
+import { PillarId } from '@/data/types';
 import { usePlan } from '@/hooks/usePlan';
 import { useMobile } from '@/hooks/useMobile';
 import { getGreeting, getWeekNumber } from '@/lib/utils';
@@ -13,13 +14,22 @@ import ReviewWidget from './ReviewWidget';
 export default function Dashboard() {
   const { currentBlock, todaySchedule } = usePlan();
   const { setView } = useAppStore();
+  const activationQuizEnabled = useAppStore((s) => s.activationQuizEnabled);
+  const startActivation = useAppStore((s) => s.startActivation);
   const navigate = useNavigate();
   const greeting = getGreeting();
   const week = getWeekNumber();
   const isMobile = useMobile();
 
   const handleJumpIn = () => {
-    if (currentBlock) {
+    if (!currentBlock) return;
+    const pillar = currentBlock.pillar as PillarId;
+    if (activationQuizEnabled) {
+      // Show the pre-session activation quiz first; it routes onward to the tutor
+      // (or skips itself when there is nothing to recall).
+      startActivation(pillar);
+      navigate('/activation');
+    } else {
       setView('tutor');
       navigate('/tutor');
     }
