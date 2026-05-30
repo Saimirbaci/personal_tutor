@@ -2,7 +2,11 @@ pub mod ai;
 pub mod commands;
 pub mod db;
 
+<<<<<<< HEAD
 use commands::{ai as ai_cmd, conversations as conv_cmd, mastery, progress, review, schedule, sync_server as sync_cmd, voice as voice_cmd};
+=======
+use commands::{activation, ai as ai_cmd, conversations as conv_cmd, progress, review, schedule, sync_server as sync_cmd, voice as voice_cmd};
+>>>>>>> origin/claude-code/feature/pre-session-activation-quiz-15ad48e7
 use sync_cmd::SyncServerHandle;
 use tauri::Manager;
 use tokio::sync::Mutex;
@@ -38,8 +42,12 @@ pub fn run() {
             review::record_review_attempt,
             review::get_due_reviews,
             review::get_review_counts,
+<<<<<<< HEAD
             mastery::recompute_mastery,
             mastery::get_mastery_scores,
+=======
+            activation::get_activation_quiz,
+>>>>>>> origin/claude-code/feature/pre-session-activation-quiz-15ad48e7
             schedule::get_today_schedule,
             schedule::schedule_notification,
             sync_cmd::start_sync_server,

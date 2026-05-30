@@ -3,9 +3,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Save, Wifi, WifiOff, RefreshCw, Loader2, Search, X, ChevronDown,
   Server, Download, Copy, Check, Play, Square,
-  Mic, Volume2, AlertCircle,
+  Mic, Volume2, AlertCircle, Brain, Minus, Plus,
 } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
+import { MIN_ACTIVATION_LENGTH, MAX_ACTIVATION_LENGTH } from '@/store/appStore';
 import { tauriInvoke, tauriListen } from '@/lib/tauri';
 import { ProviderConfig, ProviderInfo, SttEngine, SttModel, ElevenLabsVoice, DownloadProgress } from '@/data/types';
 import { getWeekNumber } from '@/lib/utils';
@@ -764,6 +765,81 @@ function OpenRouterModelPicker({ models, value, onChange }: ModelPickerProps) {
   );
 }
 
+// ── Learning Settings Section ───────────────────────────────────────────────────
+function LearningSettingsSection() {
+  const activationQuizEnabled = useAppStore((s) => s.activationQuizEnabled);
+  const activationQuizLength = useAppStore((s) => s.activationQuizLength);
+  const setActivationQuizEnabled = useAppStore((s) => s.setActivationQuizEnabled);
+  const setActivationQuizLength = useAppStore((s) => s.setActivationQuizLength);
+
+  return (
+    <motion.section
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.13 }}
+      className="rounded-xl bg-[#0f1629] border border-[#1a2540] p-5 space-y-4"
+    >
+      <div className="flex items-center gap-2">
+        <Brain size={15} className="text-[#2E5FA3]" />
+        <h2 className="text-sm font-semibold text-[#e2e8f0]">Learning</h2>
+      </div>
+
+      {/* Enable toggle */}
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs text-[#e2e8f0]">Pre-session activation quiz</p>
+          <p className="text-[10px] text-[#4a5568] mt-0.5">
+            Recall the previous session's material before loading new content.
+          </p>
+        </div>
+        <button
+          onClick={() => setActivationQuizEnabled(!activationQuizEnabled)}
+          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0 ${
+            activationQuizEnabled ? 'bg-[#2E5FA3]' : 'bg-[#1a2540]'
+          }`}
+        >
+          <span
+            className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${
+              activationQuizEnabled ? 'translate-x-4' : 'translate-x-1'
+            }`}
+          />
+        </button>
+      </div>
+
+      {/* Length stepper */}
+      {activationQuizEnabled && (
+        <div className="flex items-center justify-between gap-3 pt-1 border-t border-[#1a2540]">
+          <div>
+            <p className="text-xs text-[#e2e8f0]">Questions per quiz</p>
+            <p className="text-[10px] text-[#4a5568] mt-0.5">
+              Between {MIN_ACTIVATION_LENGTH} and {MAX_ACTIVATION_LENGTH}.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setActivationQuizLength(activationQuizLength - 1)}
+              disabled={activationQuizLength <= MIN_ACTIVATION_LENGTH}
+              className="w-7 h-7 rounded-lg border border-[#1a2540] flex items-center justify-center text-[#e2e8f0] hover:bg-[#1a2540] transition-all disabled:opacity-40"
+            >
+              <Minus size={13} />
+            </button>
+            <span className="w-6 text-center text-sm font-mono text-[#e2e8f0]">
+              {activationQuizLength}
+            </span>
+            <button
+              onClick={() => setActivationQuizLength(activationQuizLength + 1)}
+              disabled={activationQuizLength >= MAX_ACTIVATION_LENGTH}
+              className="w-7 h-7 rounded-lg border border-[#1a2540] flex items-center justify-center text-[#e2e8f0] hover:bg-[#1a2540] transition-all disabled:opacity-40"
+            >
+              <Plus size={13} />
+            </button>
+          </div>
+        </div>
+      )}
+    </motion.section>
+  );
+}
+
 // ── Main Settings Component ───────────────────────────────────────────────────
 export default function Settings() {
   const { providerConfig, setProviderConfig } = useAppStore();
@@ -1174,6 +1250,9 @@ export default function Settings() {
           </div>
           <p className="text-xs text-[#4a5568]">{Math.max(12 - week, 0)} weeks remaining</p>
         </motion.section>
+
+        {/* ── Learning ────────────────────────────────────────────────────── */}
+        <LearningSettingsSection />
 
         {/* ── Voice ───────────────────────────────────────────────────────── */}
         <VoiceSettingsSection />

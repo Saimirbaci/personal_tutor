@@ -38,6 +38,7 @@ import TutorChat from '@/components/tutor/TutorChat';
 import PillarView from '@/components/pillars/PillarView';
 import ProgressView from '@/components/progress/ProgressView';
 import Settings from '@/components/settings/Settings';
+import ActivationQuiz from '@/components/activation/ActivationQuiz';
 import { useAppStore } from '@/store/appStore';
 import { useProgress } from '@/hooks/useProgress';
 
@@ -62,6 +63,9 @@ export default function App() {
     switch (currentView) {
       case 'dashboard':
         if (location.pathname !== '/') navigate('/');
+        break;
+      case 'activation':
+        if (location.pathname !== '/activation') navigate('/activation');
         break;
       case 'tutor':
         if (location.pathname !== '/tutor') navigate('/tutor');
@@ -98,6 +102,22 @@ export default function App() {
                 className="h-full"
               >
                 <Dashboard />
+              </motion.div>
+            }
+          />
+          <Route
+            path="/activation"
+            element={
+              <motion.div
+                key="activation"
+                variants={pageVariants}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                transition={{ duration: 0.2 }}
+                className="h-full"
+              >
+                <ActivationQuiz />
               </motion.div>
             }
           />
