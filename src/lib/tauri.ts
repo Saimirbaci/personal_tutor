@@ -32,7 +32,23 @@ export async function tauriEmit(event: string, payload?: unknown): Promise<void>
 }
 
 // Mock data for browser development
-function getMockData<T>(cmd: string, _args?: Record<string, unknown>): Promise<T> {
+function getMockData<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  // Mastery: derive varied scores from the passed curriculum item refs so the
+  // rings line up with the real list items in dev (no Rust backend).
+  if (cmd === 'recompute_mastery' || cmd === 'get_mastery_scores') {
+    const items = (args?.items as Array<{ itemId: string; pillarId: string; topic: string }>) ?? [];
+    const sample = items.map((item, i) => ({
+      pillarId: item.pillarId,
+      itemId: item.itemId,
+      score: [82, 47, 18, 95, 63, 34][i % 6],
+      quizAccuracy: 0.7,
+      easeNorm: 0.6,
+      depthNorm: 0.4,
+      updatedAt: new Date().toISOString(),
+    }));
+    return Promise.resolve(sample as T);
+  }
+
   const mocks: Record<string, unknown> = {
     get_providers: [
       {

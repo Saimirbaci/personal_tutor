@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { AiMessage, PillarId, ProgressData, ProviderConfig, VoiceConfig, WeeklyDigest } from '@/data/types';
+import { AiMessage, MasteryScore, PillarId, ProgressData, ProviderConfig, VoiceConfig, WeeklyDigest } from '@/data/types';
 
 /** A lightweight conversation row used in the sidebar/history list.
  *  (Distinct from the AI-generated `ConversationSummary` note in data/types.ts.) */
@@ -13,12 +13,21 @@ export interface ConversationListEntry {
   message_count: number;
 }
 
-type ViewType = 'dashboard' | 'tutor' | 'pillar' | 'progress' | 'settings';
+type ViewType = 'dashboard' | 'tutor' | 'pillar' | 'progress' | 'settings' | 'activation';
+
+/** Activation quiz length is clamped to this range (mirrors the backend). */
+export const MIN_ACTIVATION_LENGTH = 3;
+export const MAX_ACTIVATION_LENGTH = 5;
 
 interface AppState {
   // Navigation
   currentView: ViewType;
   activePillar: PillarId | null;
+
+  // Pre-session activation quiz
+  pendingSessionPillar: PillarId | null;
+  activationQuizEnabled: boolean;
+  activationQuizLength: number;
 
   // AI
   messages: AiMessage[];
@@ -41,6 +50,9 @@ interface AppState {
   weeklyDigests: WeeklyDigest[];
   selectedDigestWeek: string | null;
 
+  // Mastery (ephemeral — recomputable, never persisted)
+  masteryByItem: Record<string, number>;
+
   // Voice
   voiceConfig: VoiceConfig;
 
@@ -51,6 +63,10 @@ interface AppState {
 
   // Actions
   setView: (view: ViewType, pillar?: PillarId) => void;
+  startActivation: (pillar: PillarId) => void;
+  completeActivation: () => void;
+  setActivationQuizEnabled: (enabled: boolean) => void;
+  setActivationQuizLength: (length: number) => void;
   addMessage: (msg: AiMessage) => void;
   appendToken: (token: string) => void;
   finalizeStream: () => void;
@@ -64,6 +80,7 @@ interface AppState {
   setStreak: (s: number) => void;
   setWeeklyDigests: (d: WeeklyDigest[]) => void;
   setSelectedDigestWeek: (weekStart: string | null) => void;
+  setMasteryScores: (scores: MasteryScore[]) => void;
   setProviderConfig: (c: ProviderConfig) => void;
   toggleSidebar: () => void;
   setMobileSidebarOpen: (open: boolean) => void;
@@ -77,6 +94,10 @@ export const useAppStore = create<AppState>()(
     (set, get) => ({
       currentView: 'dashboard',
       activePillar: null,
+
+      pendingSessionPillar: null,
+      activationQuizEnabled: true,
+      activationQuizLength: 4,
 
       messages: [],
       isStreaming: false,
@@ -96,6 +117,7 @@ export const useAppStore = create<AppState>()(
 
       weeklyDigests: [],
       selectedDigestWeek: null,
+      masteryByItem: {},
 
       voiceConfig: {
         enabled: false,
@@ -113,6 +135,19 @@ export const useAppStore = create<AppState>()(
 
       setView: (view, pillar) =>
         set({ currentView: view, activePillar: pillar ?? get().activePillar }),
+
+      startActivation: (pillar) =>
+        set({ currentView: 'activation', pendingSessionPillar: pillar }),
+      completeActivation: () =>
+        set({ currentView: 'tutor', pendingSessionPillar: null }),
+      setActivationQuizEnabled: (enabled) => set({ activationQuizEnabled: enabled }),
+      setActivationQuizLength: (length) =>
+        set({
+          activationQuizLength: Math.min(
+            MAX_ACTIVATION_LENGTH,
+            Math.max(MIN_ACTIVATION_LENGTH, Math.round(length))
+          ),
+        }),
 
       addMessage: (msg) =>
         set((state) => ({ messages: [...state.messages, msg] })),
@@ -178,6 +213,13 @@ export const useAppStore = create<AppState>()(
       setStreak: (s) => set({ streak: s }),
       setWeeklyDigests: (d) => set({ weeklyDigests: d }),
       setSelectedDigestWeek: (weekStart) => set({ selectedDigestWeek: weekStart }),
+      setMasteryScores: (scores) =>
+        set(() => ({
+          masteryByItem: scores.reduce<Record<string, number>>((acc, s) => {
+            acc[s.itemId] = s.score;
+            return acc;
+          }, {}),
+        })),
       setProviderConfig: (c) => set({ providerConfig: c }),
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
       setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
@@ -193,6 +235,8 @@ export const useAppStore = create<AppState>()(
         voiceConfig: state.voiceConfig,
         sidebarCollapsed: state.sidebarCollapsed,
         activePillar: state.activePillar,
+        activationQuizEnabled: state.activationQuizEnabled,
+        activationQuizLength: state.activationQuizLength,
       }),
     }
   )

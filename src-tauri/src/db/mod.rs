@@ -119,6 +119,20 @@ pub fn init(app: &AppHandle) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_weekly_digests_week_start
             ON weekly_digests(week_start DESC);
+
+        CREATE TABLE IF NOT EXISTS mastery_scores (
+            pillar_id     TEXT NOT NULL,
+            item_id       TEXT NOT NULL,
+            score         REAL NOT NULL DEFAULT 0,
+            quiz_accuracy REAL,
+            ease_norm     REAL,
+            depth_norm    REAL,
+            updated_at    TEXT NOT NULL,
+            PRIMARY KEY (pillar_id, item_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_mastery_pillar
+            ON mastery_scores(pillar_id);
         ",
     )?;
 

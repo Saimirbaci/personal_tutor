@@ -301,3 +301,62 @@ export interface WeeklyDigest {
   metrics: DigestMetrics;
   createdAt: string;
 }
+
+// ── Per-Topic Mastery ─────────────────────────────────────────────────────────
+
+/** Blended 0–100 mastery score for a single curriculum item.
+ *  Mirrors the Rust `MasteryScore` serde struct (camelCase). */
+export interface MasteryScore {
+  pillarId: PillarId;
+  itemId: string;
+  score: number;
+  quizAccuracy: number | null;
+  easeNorm: number | null;
+  depthNorm: number | null;
+  updatedAt: string;
+}
+
+/** Reference passed to `recompute_mastery` so curriculum data stays
+ *  single-sourced in `plan.ts` rather than duplicated in Rust. */
+export interface CurriculumItemRef {
+  itemId: string;
+  pillarId: PillarId;
+  topic: string;
+}
+
+// ── Pre-Session Activation Quiz ────────────────────────────────────────────────
+
+/** Where an activation question was assembled from. */
+export type ActivationSource = 'review-queue' | 'session-summary';
+
+export interface ActivationQuestion {
+  /** Stable id unique within a single quiz payload. */
+  id: string;
+  /** Existing SM-2 review item id, when sourced from the queue. */
+  itemId: string | null;
+  itemType: ReviewItemType;
+  pillar: PillarId | null;
+  prompt: string;
+  /** Multiple-choice options, when available. */
+  options: string[] | null;
+  /** Index of the correct option, when available. */
+  correctIndex: number | null;
+  /** Reference answer for self-graded recall, when available. */
+  answer: string | null;
+  source: ActivationSource;
+}
+
+export interface ActivationQuiz {
+  pillar: PillarId | null;
+  sourceSessionId: string | null;
+  questions: ActivationQuestion[];
+}
+
+/** A graded activation answer, fed back into SM-2 via record_review_attempt. */
+export interface ActivationResult {
+  itemId: string;
+  itemType: ReviewItemType;
+  pillar: PillarId | null;
+  content: string;
+  quality: number;
+}
