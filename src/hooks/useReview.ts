@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { tauriInvoke } from '@/lib/tauri';
-import { PillarId, ReviewCounts, ReviewItem, ReviewItemType } from '@/data/types';
+import { useAppStore } from '@/store/appStore';
+import { KnowledgeGap, PillarId, ReviewCounts, ReviewItem, ReviewItemType } from '@/data/types';
 
 /** Stable djb2 hash for deriving review item IDs from question text. */
 function stableHash(input: string): string {
@@ -43,6 +44,13 @@ export function useReview() {
           content,
           quality,
         });
+        // Recompute knowledge gaps so weak/strong topics refresh immediately.
+        try {
+          const gaps = await tauriInvoke<KnowledgeGap[]>('detect_knowledge_gaps');
+          useAppStore.getState().setKnowledgeGaps(gaps);
+        } catch (gapErr) {
+          console.error('Failed to refresh knowledge gaps:', gapErr);
+        }
       } catch (err) {
         console.error('Failed to record review attempt:', err);
       }

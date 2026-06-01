@@ -7,6 +7,7 @@ import { ConversationSummary, PillarId } from '@/data/types';
 import { tauriInvoke } from '@/lib/tauri';
 import SummaryCard from '@/components/SummaryCard';
 import WeeklyDigestCard from '@/components/progress/WeeklyDigestCard';
+import NeedsAttention from './NeedsAttention';
 
 interface SummaryRow {
   conversationId: string;
@@ -82,6 +83,9 @@ export default function ProgressView() {
             </p>
           </div>
         </motion.div>
+
+        {/* Needs attention — auto-detected knowledge gaps */}
+        <NeedsAttention />
 
         {/* Weekly digest */}
         <WeeklyDigestCard />

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { AiMessage, MasteryScore, PillarId, ProgressData, ProviderConfig, VoiceConfig, WeeklyDigest } from '@/data/types';
+import { AiMessage, KnowledgeGap, MasteryScore, PillarId, ProgressData, ProviderConfig, VoiceConfig, WeeklyDigest } from '@/data/types';
 
 /** A lightweight conversation row used in the sidebar/history list.
  *  (Distinct from the AI-generated `ConversationSummary` note in data/types.ts.) */
@@ -53,6 +53,9 @@ interface AppState {
   // Mastery (ephemeral — recomputable, never persisted)
   masteryByItem: Record<string, number>;
 
+  // Knowledge gaps (ephemeral — recomputed from live signals, never persisted)
+  knowledgeGaps: KnowledgeGap[] | null;
+
   // Voice
   voiceConfig: VoiceConfig;
 
@@ -81,6 +84,7 @@ interface AppState {
   setWeeklyDigests: (d: WeeklyDigest[]) => void;
   setSelectedDigestWeek: (weekStart: string | null) => void;
   setMasteryScores: (scores: MasteryScore[]) => void;
+  setKnowledgeGaps: (gaps: KnowledgeGap[]) => void;
   setProviderConfig: (c: ProviderConfig) => void;
   toggleSidebar: () => void;
   setMobileSidebarOpen: (open: boolean) => void;
@@ -114,6 +118,7 @@ export const useAppStore = create<AppState>()(
 
       progress: null,
       streak: 0,
+      knowledgeGaps: null,
 
       weeklyDigests: [],
       selectedDigestWeek: null,
@@ -220,6 +225,7 @@ export const useAppStore = create<AppState>()(
             return acc;
           }, {}),
         })),
+      setKnowledgeGaps: (gaps) => set({ knowledgeGaps: gaps }),
       setProviderConfig: (c) => set({ providerConfig: c }),
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
       setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
