@@ -1,3 +1,4 @@
+pub mod activation;
 pub mod ai;
 pub mod conversations;
 pub mod mastery;
