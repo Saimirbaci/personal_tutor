@@ -3,6 +3,7 @@ import { useAppStore } from '@/store/appStore';
 import { PILLARS } from '@/data/plan';
 import { formatHours, formatDateShort } from '@/lib/utils';
 import { PillarId } from '@/data/types';
+import NeedsAttention from './NeedsAttention';
 
 export default function ProgressView() {
   const { progress, streak } = useAppStore();
@@ -37,6 +38,9 @@ export default function ProgressView() {
             </p>
           </div>
         </motion.div>
+
+        {/* Needs attention — auto-detected knowledge gaps */}
+        <NeedsAttention />
 
         {/* Pillar breakdown */}
         <motion.div

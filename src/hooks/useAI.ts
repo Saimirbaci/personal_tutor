@@ -1,10 +1,22 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useAppStore } from '@/store/appStore';
 import { tauriInvoke, tauriListen } from '@/lib/tauri';
-import { AiMessage, PillarId } from '@/data/types';
+import { AiMessage, GapSignalKind, KnowledgeGap, PillarId } from '@/data/types';
 import { PILLARS } from '@/data/plan';
-import { getWeekNumber } from '@/lib/utils';
+import { getWeekNumber, truncate } from '@/lib/utils';
 import { useConversations } from './useConversations';
+
+/** Max weak areas injected into the prompt to avoid bloat. */
+const MAX_WEAK_AREAS = 3;
+/** Only surface gaps at/above this severity so the tutor isn't naggy. */
+const WEAK_AREA_MIN_SEVERITY = 0.35;
+
+const SIGNAL_DESC: Record<GapSignalKind, string> = {
+  weak_quiz: 'repeatedly answered incorrectly',
+  low_ease: 'hard to retain across reviews',
+  shallow_chat: 'engaged only superficially',
+  stale: 'no recent practice',
+};
 
 const SYSTEM_PROMPT = `You are a personal learning tutor for a 3-month intensive growth sprint. Your student is Saimir Baci, CTO & co-founder of Augmentifai, focused on 12 learning pillars:
 
@@ -69,7 +81,33 @@ The roofline model reveals whether your workload is compute-bound or memory-band
 
 Use GenUI blocks liberally — every technical concept deserves a visual representation. Mix text explanation with GenUI blocks naturally. Always end with a question or next step to keep the learning momentum going.`;
 
-function buildContextualSystemPrompt(pillar: PillarId | null): string {
+/** Builds a concise "KNOWN WEAK AREAS" section for the active pillar's top gaps. */
+function buildWeakAreasSection(pillar: PillarId, gaps: KnowledgeGap[]): string {
+  const pillarGaps = gaps
+    .filter((g) => g.pillar === pillar && g.status === 'open' && g.severity >= WEAK_AREA_MIN_SEVERITY)
+    .sort((a, b) => b.severity - a.severity)
+    .slice(0, MAX_WEAK_AREAS);
+
+  if (pillarGaps.length === 0) return '';
+
+  const lines = pillarGaps
+    .map((g) => {
+      const dominant = [...g.signals].sort((a, b) => b.weight - a.weight)[0];
+      const desc = dominant ? SIGNAL_DESC[dominant.kind] : 'weak area';
+      // gap.label is derived/truncated topic text — cap defensively against bloat.
+      return `- ${truncate(g.label, 100)} (${desc})`;
+    })
+    .join('\n');
+
+  return (
+    `\n\nKNOWN WEAK AREAS (detected from this student's quiz/review history):\n${lines}\n\n` +
+    `Naturally reinforce these weak areas when relevant. When one comes up — or when the ` +
+    `student seems ready — PROACTIVELY propose a short targeted drill instead of waiting to ` +
+    `be asked, emitting a quiz or flashcard GenUI block focused on the weak topic.`
+  );
+}
+
+function buildContextualSystemPrompt(pillar: PillarId | null, gaps: KnowledgeGap[] = []): string {
   const week = getWeekNumber();
   let contextAddon = '';
 
@@ -77,6 +115,7 @@ function buildContextualSystemPrompt(pillar: PillarId | null): string {
     const pillarInfo = PILLARS.find((p) => p.id === pillar);
     if (pillarInfo) {
       contextAddon = `\n\nCURRENT FOCUS: ${pillarInfo.emoji} ${pillarInfo.name}\nCurrent week: Week ${week} of 12\nDescription: ${pillarInfo.description}\n\nTailor your teaching and GenUI blocks to this pillar's specific concepts.`;
+      contextAddon += buildWeakAreasSection(pillar, gaps);
     }
   } else {
     contextAddon = `\n\nCurrent week: Week ${week} of 12`;
@@ -97,6 +136,7 @@ export function useAI() {
     startStream,
     clearMessages,
     activeConversationId,
+    knowledgeGaps,
   } = useAppStore();
 
   const { persistMessage } = useConversations();
@@ -172,7 +212,10 @@ export function useAI() {
       unlistenDoneRef.current = unlistenDone;
       unlistenErrorRef.current = unlistenError;
 
-      const systemPrompt = buildContextualSystemPrompt(contextPillar ?? activePillar);
+      const systemPrompt = buildContextualSystemPrompt(
+        contextPillar ?? activePillar,
+        knowledgeGaps ?? []
+      );
 
       const backendMessages = messages
         .concat(userMessage)
@@ -196,7 +239,7 @@ export function useAI() {
       }
     },
     [messages, isStreaming, providerConfig, activePillar, activeConversationId,
-     addMessage, appendToken, finalizeStream, startStream, persistMessage]
+     knowledgeGaps, addMessage, appendToken, finalizeStream, startStream, persistMessage]
   );
 
   return {

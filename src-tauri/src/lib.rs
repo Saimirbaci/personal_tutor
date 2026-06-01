@@ -2,7 +2,7 @@ pub mod ai;
 pub mod commands;
 pub mod db;
 
-use commands::{activation, ai as ai_cmd, conversations as conv_cmd, mastery, progress, review, schedule, sync_server as sync_cmd, voice as voice_cmd};
+use commands::{activation, ai as ai_cmd, conversations as conv_cmd, gaps, mastery, progress, review, schedule, sync_server as sync_cmd, voice as voice_cmd};
 use sync_cmd::SyncServerHandle;
 use tauri::Manager;
 use tokio::sync::Mutex;
@@ -41,6 +41,11 @@ pub fn run() {
             mastery::recompute_mastery,
             mastery::get_mastery_scores,
             activation::get_activation_quiz,
+            // Knowledge gap commands
+            gaps::get_knowledge_gaps,
+            gaps::detect_knowledge_gaps,
+            gaps::dismiss_gap,
+            gaps::mark_gap_drilled,
             schedule::get_today_schedule,
             schedule::schedule_notification,
             sync_cmd::start_sync_server,

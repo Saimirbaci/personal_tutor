@@ -1,6 +1,7 @@
 pub mod activation;
 pub mod ai;
 pub mod conversations;
+pub mod gaps;
 pub mod mastery;
 pub mod progress;
 pub mod review;
