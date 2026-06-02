@@ -29,12 +29,12 @@ pub async fn command_name(
 ## Database (rusqlite)
 Two access patterns coexist — pick one consistently per command file:
 - **Shared `DbState(pub Mutex<Connection>)`** — preferred for write-heavy or transactional flows. Always `lock().map_err(|e| e.to_string())?` — never `.unwrap()`. Lock for the shortest possible scope; extract data and release before any `await`.
-- **Per-call `db::get_connection(&app)`** — opens a fresh `Connection` (used by `review.rs`). Safe under WAL for short reads/writes; useful for synchronous `#[tauri::command] pub fn` handlers that don't share state.
+- **Per-call `db::get_connection(&app)`** — opens a fresh `Connection` (used by `review.rs` and `rebalance.rs`). Safe under WAL for short reads/writes; useful for synchronous `#[tauri::command] pub fn` handlers that don't share state.
 
 Rules that apply to both:
 - Use parameterized queries exclusively: `params![val1, val2]`
 - Handle `rusqlite::Error::QueryReturnedNoRows` explicitly (map to `None` or 404)
-- Tables: `sessions`, `milestones`, `settings`, `conversations`, `chat_messages`, `review_items`
+- Tables: `sessions`, `milestones`, `settings`, `conversations`, `chat_messages`, `review_items`, `plan_adjustments`
 
 ```rust
 // Good — brief lock, no await while holding
@@ -60,6 +60,9 @@ window.emit("ai-done", ())?;
 window.emit("ai-error", error_message)?;
 ```
 Always emit `ai-done` or `ai-error` — never leave the frontend in a streaming state.
+
+### Non-Streaming Background AI
+For background features that need an AI rationale without touching the live chat stream (e.g. plan rebalancing), use `collect_completion(messages, system, config, timeout_secs)` in `commands/ai.rs`. It reuses the provider's `stream_completion` plumbing but collects tokens into a buffer via an mpsc channel instead of emitting them to the UI, bounded by a timeout. Returns the full text as `Result<String, String>`.
 
 ## AI Provider Trait
 ```rust

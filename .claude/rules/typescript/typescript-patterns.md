@@ -11,6 +11,7 @@
 - All AI streaming state lives in the store: `messages`, `isStreaming`, `streamingContent`, `currentToken`
 - Never store derived data in the store — compute with selectors
 - Persisted keys: `providerConfig`, `voiceConfig`, `sidebarCollapsed`, `activePillar`
+- Ephemeral (NOT persisted) drift/rebalance keys: `pillarDrift`, `planAdjustments`, `pendingPrompt` — `pendingPrompt` is a one-shot queued for the tutor (e.g. a drift catch-up drill), consumed once after the tutor mounts
 - Use `useAppStore` hook — always select only what the component needs:
 
 ```typescript
@@ -42,6 +43,8 @@ useEffect(() => {
 - AI interactions: `useAI` — builds system prompt, calls `stream_chat`, manages Tauri event subscriptions
 - Voice: `useVoice` — calls `transcribe_audio`, `tts_elevenlabs`, model status/download
 - Progress: `useProgress` — calls `log_session`, `get_progress`, `get_streak`
+- Drift: `useDrift` — `loadDrift(thresholdDays?)` calls `get_pillar_drift`, stores the `DriftReport` (auto-loads on mount)
+- Rebalance: `usePlanRebalance` — `loadAdjustments`, `generate`, `apply(weekStart)`, `dismiss(weekStart)`, `maybeGenerateDue` wrap the plan-rebalance commands
 - Never call `tauriInvoke` directly inside React components
 
 ## Types
