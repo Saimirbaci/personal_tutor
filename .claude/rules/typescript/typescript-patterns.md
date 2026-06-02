@@ -10,7 +10,7 @@
 - Single store: `src/store/appStore.ts` — do not create additional stores
 - All AI streaming state lives in the store: `messages`, `isStreaming`, `streamingContent`, `currentToken`
 - Never store derived data in the store — compute with selectors
-- Persisted keys: `providerConfig`, `voiceConfig`, `sidebarCollapsed`, `activePillar`
+- Persisted keys: `providerConfig`, `voiceConfig`, `forgettingCurveSettings`, `sidebarCollapsed`, `activePillar`
 - Use `useAppStore` hook — always select only what the component needs:
 
 ```typescript
@@ -42,6 +42,8 @@ useEffect(() => {
 - AI interactions: `useAI` — builds system prompt, calls `stream_chat`, manages Tauri event subscriptions
 - Voice: `useVoice` — calls `transcribe_audio`, `tts_elevenlabs`, model status/download
 - Progress: `useProgress` — calls `log_session`, `get_progress`, `get_streak`
+- Forgetting curve: `useForgettingCurve` — in-app poll that fires OS nudges (quiet-hours + daily-cap gated); `useForgettingNudgePreview` is a read-only fetch that must NOT call `mark_review_notified`
+- Background polls/timers must guard against React StrictMode double-mount (e.g. a `startedRef`) and clear their interval on cleanup
 - Never call `tauriInvoke` directly inside React components
 
 ## Types

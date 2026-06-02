@@ -36,6 +36,28 @@ Rules that apply to both:
 - Handle `rusqlite::Error::QueryReturnedNoRows` explicitly (map to `None` or 404)
 - Tables: `sessions`, `milestones`, `settings`, `conversations`, `chat_messages`, `review_items`
 
+## Schema Migrations
+- `CREATE TABLE IF NOT EXISTS` only creates new tables — it cannot add a column to a pre-existing table. New columns go through `db/mod.rs::run_migrations()`, which runs after table creation in `init()`.
+- Add columns with the `add_column_if_missing(conn, table, column, alter_sql)` helper — it checks `PRAGMA table_info` rather than swallowing a duplicate-column error.
+- Every migration must be idempotent (safe to re-run on an already-migrated DB).
+
+```rust
+fn run_migrations(conn: &Connection) -> Result<()> {
+    add_column_if_missing(
+        conn,
+        "review_items",
+        "last_notified_at",
+        "ALTER TABLE review_items ADD COLUMN last_notified_at TEXT",
+    )?;
+    Ok(())
+}
+```
+
+## Pure Logic for Testability
+- Extract ranking/scoring/formatting out of `#[tauri::command]` handlers into pure functions that take plain rows + a clock value (e.g. `build_nudges(rows, now, max)`, `retention(...)`), so they unit-test without `AppHandle`/SQLite.
+- The command handler stays thin: open the connection, query rows into a private struct (e.g. `NudgeRow`), then call the pure function.
+- Inject "now" as a parameter (`now: DateTime<Local>`) instead of calling `Local::now()` inside the pure function — lets tests pin a fixed timestamp.
+
 ```rust
 // Good — brief lock, no await while holding
 let messages = {

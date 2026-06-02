@@ -30,7 +30,7 @@ Rust Backend (Tauri v2 + rusqlite + Tokio)
     │   ├── ai.rs            → stream_chat, get_providers, model listing, save_provider_config
     │   ├── conversations.rs → CRUD + bulk_import_sync
     │   ├── progress.rs      → log_session, get_progress, get_streak, update_milestone
-    │   ├── review.rs        → SM-2 spaced repetition (record_review_attempt, get_due_reviews, get_review_counts)
+    │   ├── review.rs        → SM-2 spaced repetition + forgetting-curve nudges (record_review_attempt, get_due_reviews, get_review_counts, get_forgetting_curve_due, mark_review_notified)
     │   ├── schedule.rs      → get_today_schedule, schedule_notification
     │   ├── sync_server.rs   → Axum-based local sync server (start/stop/status)
     │   └── voice.rs         → STT model management, transcribe_audio, ElevenLabs TTS
@@ -68,7 +68,7 @@ The `useAI` hook in `src/hooks/useAI.ts` handles event subscriptions and calls t
 
 ## State Management
 Single Zustand store in `src/store/appStore.ts` with `persist` middleware.
-Persisted keys: `providerConfig`, `voiceConfig`, `sidebarCollapsed`, `activePillar`.
+Persisted keys: `providerConfig`, `voiceConfig`, `forgettingCurveSettings`, `sidebarCollapsed`, `activePillar`.
 Ephemeral: all messages, streaming state, conversation list, progress data.
 
 ## Database (rusqlite)
@@ -77,12 +77,15 @@ SQLite at `{app_data_dir}/tutor.db`. WAL mode, foreign keys ON.
 - **`milestones`** — per-pillar milestone status (pending/in-progress/complete)
 - **`conversations`** — chat conversation metadata (pillar, title)
 - **`chat_messages`** — individual messages (role, content, genui JSON)
-- **`review_items`** — SM-2 spaced repetition state (item_id, item_type, pillar, ease_factor, interval_days, repetitions, next_due)
+- **`review_items`** — SM-2 spaced repetition state (item_id, item_type, pillar, ease_factor, interval_days, repetitions, next_due, last_seen, content, last_notified_at)
 - **`settings`** — key/value store
 
 Two DB access patterns coexist:
 - `DbState(Mutex<Connection>)` — shared connection, locked per call (used by most commands)
 - `db::get_connection(&app)` — opens a fresh `rusqlite::Connection` per call (used by `review.rs`); safe under WAL but bypasses the shared mutex
+
+### Schema Migrations
+`db/mod.rs::run_migrations()` runs after `CREATE TABLE IF NOT EXISTS` and applies idempotent column additions that `CREATE TABLE` cannot. Use the `add_column_if_missing(conn, table, column, alter_sql)` helper — it inspects `PRAGMA table_info` rather than swallowing a duplicate-column error. Each migration must tolerate re-running on an already-migrated DB. (Example: `review_items.last_notified_at` for forgetting-curve nudges.)
 
 ## Sync Server
 Axum HTTP server on a local port (start/stop via Tauri commands). Used to sync conversations from mobile/web to desktop. `SyncServerHandle(Mutex<Option<...>>)` managed as Tauri app state.
@@ -102,7 +105,7 @@ Default: `anthropic / claude-sonnet-4-5`.
 
 ## Key Types
 All TypeScript interfaces in `src/data/types.ts`. Match Rust serde structs exactly (camelCase).
-Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`.
+Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`, `ForgettingNudge`, `ForgettingCurveSettings`.
 
 ## Spaced Repetition
 SM-2 algorithm in `src-tauri/src/commands/review.rs`. Quality grades 0–5 (≥3 passes). Failed reviews reset interval to 1 day; ease factor floored at 1.3.
@@ -110,6 +113,14 @@ SM-2 algorithm in `src-tauri/src/commands/review.rs`. Quality grades 0–5 (≥3
 - Item IDs derived deterministically via `buildReviewItemId(type, pillar, question)` (djb2 hash) so the same flashcard/quiz across sessions maps to one review row
 - `Flashcard` and `Quiz` GenUI renderers call `recordAttempt` on user interaction
 - `ReviewWidget` on the Dashboard surfaces due-count
+
+## Forgetting Curve Notifications
+Decay-based review nudges layered on top of the SM-2 data. Backend ranking is a pure, testable function; the OS-notification policy (quiet hours, daily cap, dedup) lives on the frontend.
+- **Retention model** (`review.rs`): `R = exp(-t / S)` (Ebbinghaus). Stability `S` grows with the SM-2 interval and per-item ease. Items at/under `NOTIFY_THRESHOLD` (0.80) become nudge candidates. `build_nudges()` is pure — it filters already-notified rows, ranks most-forgotten first, and caps the count.
+- **Commands**: `get_forgetting_curve_due(lookaheadMin?, maxItems?)` returns ranked `ForgettingNudge`s; `mark_review_notified(itemId)` stamps `last_notified_at` to suppress repeats until the item is reviewed again (which updates `last_seen` and re-arms the nudge).
+- **Frontend hook**: `useForgettingCurve` runs an in-app poll (only while the app is open), enforces quiet hours (`isWithinQuietHours`, wraps past midnight), a localStorage per-calendar-day cap, then fires `schedule_notification` + `mark_review_notified` per nudge. `useForgettingNudgePreview` is a read-only fetch for in-app display that does NOT mark items notified.
+- **UI**: `ForgettingCurveCard` on the Dashboard (read-only "About to forget" list); `ForgettingCurveSection` in Settings (toggle, quiet hours, daily cap, poll interval, test reminder).
+- **Settings**: `forgettingCurveSettings` in the Zustand store (persisted) — `enabled`, `quietHoursStart/End`, `dailyCap`, `pollMinutes`, `lookaheadMinutes`.
 
 ## Tauri IPC Layer
 `src/lib/tauri.ts` provides `tauriInvoke()` and `tauriListen()` wrappers with browser fallback mocks for dev server testing without full Tauri.
