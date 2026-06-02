@@ -215,3 +215,34 @@ export interface ReviewCounts {
   due: number;
   dueToday: number;
 }
+
+// ── Forgetting Curve Notifications ──────────────────────────────────────────────
+
+/** A single decay-based reminder produced by `get_forgetting_curve_due`.
+ *  Mirrors the Rust `ForgettingNudge` struct (camelCase). */
+export interface ForgettingNudge {
+  itemId: string;
+  itemType: ReviewItemType;
+  pillar: PillarId | null;
+  content: string;
+  /** Estimated retention in (0, 1] — lower means more forgotten. */
+  retention: number;
+  daysSinceSeen: number;
+  nextDue: string;
+  title: string;
+  body: string;
+}
+
+/** User preferences for forgetting-curve nudges (persisted in Zustand). */
+export interface ForgettingCurveSettings {
+  enabled: boolean;
+  /** Quiet-hours window in local 24h time; no nudges fire inside it. */
+  quietHoursStart: number;
+  quietHoursEnd: number;
+  /** Maximum nudges fired per calendar day. */
+  dailyCap: number;
+  /** How often the app re-checks for newly-decayed items, in minutes. */
+  pollMinutes: number;
+  /** Include items coming due within this many minutes. */
+  lookaheadMinutes: number;
+}

@@ -78,6 +78,8 @@ function getMockData<T>(cmd: string, _args?: Record<string, unknown>): Promise<T
     record_review_attempt: null,
     get_due_reviews: [],
     get_review_counts: { total: 0, due: 0, dueToday: 0 },
+    get_forgetting_curve_due: [],
+    mark_review_notified: null,
     update_milestone: null,
     save_provider_config: null,
     schedule_notification: null,
