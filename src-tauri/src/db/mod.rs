@@ -110,7 +110,42 @@ pub fn init(app: &AppHandle) -> Result<()> {
         ",
     )?;
 
+    run_migrations(&conn)?;
+
     app.manage(DbState(Mutex::new(conn)));
+    Ok(())
+}
+
+/// Idempotent schema migrations for columns that `CREATE TABLE IF NOT EXISTS`
+/// cannot add to a pre-existing table. Each migration must tolerate being
+/// re-run on an already-migrated database.
+fn run_migrations(conn: &Connection) -> Result<()> {
+    add_column_if_missing(
+        conn,
+        "review_items",
+        "last_notified_at",
+        "ALTER TABLE review_items ADD COLUMN last_notified_at TEXT",
+    )?;
+    Ok(())
+}
+
+/// Adds a column only when it is not already present, by inspecting
+/// `PRAGMA table_info`. Avoids relying on swallowing a duplicate-column error.
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    alter_sql: &str,
+) -> Result<()> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let exists = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(|r| r.ok())
+        .any(|name| name == column);
+
+    if !exists {
+        conn.execute(alter_sql, [])?;
+    }
     Ok(())
 }
 

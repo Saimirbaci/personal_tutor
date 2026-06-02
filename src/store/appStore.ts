@@ -1,6 +1,15 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { AiMessage, DriftReport, PillarId, PlanAdjustment, ProgressData, ProviderConfig, VoiceConfig } from '@/data/types';
+import { AiMessage, DriftReport, ForgettingCurveSettings, PillarId, PlanAdjustment, ProgressData, ProviderConfig, VoiceConfig } from '@/data/types';
+
+const DEFAULT_FORGETTING_CURVE_SETTINGS: ForgettingCurveSettings = {
+  enabled: true,
+  quietHoursStart: 22,
+  quietHoursEnd: 7,
+  dailyCap: 4,
+  pollMinutes: 30,
+  lookaheadMinutes: 0,
+};
 
 export interface ConversationSummary {
   id: string;
@@ -43,6 +52,9 @@ interface AppState {
   // Voice
   voiceConfig: VoiceConfig;
 
+  // Forgetting-curve notifications
+  forgettingCurveSettings: ForgettingCurveSettings;
+
   // UI
   sidebarCollapsed: boolean;
   mobileSidebarOpen: boolean;
@@ -69,6 +81,7 @@ interface AppState {
   clearMessages: () => void;
   setLogSessionModal: (open: boolean) => void;
   setVoiceConfig: (c: Partial<VoiceConfig>) => void;
+  setForgettingCurveSettings: (c: Partial<ForgettingCurveSettings>) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -105,6 +118,8 @@ export const useAppStore = create<AppState>()(
         elevenLabsApiKey: '',
         elevenLabsVoiceId: 'EXAVITQu4vr4xnSDxMaL', // "Sarah" — good default
       },
+
+      forgettingCurveSettings: DEFAULT_FORGETTING_CURVE_SETTINGS,
 
       sidebarCollapsed: false,
       mobileSidebarOpen: false,
@@ -184,12 +199,17 @@ export const useAppStore = create<AppState>()(
       setLogSessionModal: (open) => set({ logSessionModalOpen: open }),
       setVoiceConfig: (c) =>
         set((state) => ({ voiceConfig: { ...state.voiceConfig, ...c } })),
+      setForgettingCurveSettings: (c) =>
+        set((state) => ({
+          forgettingCurveSettings: { ...state.forgettingCurveSettings, ...c },
+        })),
     }),
     {
       name: 'personal-tutor-store',
       partialize: (state) => ({
         providerConfig: state.providerConfig,
         voiceConfig: state.voiceConfig,
+        forgettingCurveSettings: state.forgettingCurveSettings,
         sidebarCollapsed: state.sidebarCollapsed,
         activePillar: state.activePillar,
       }),
