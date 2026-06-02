@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { tauriInvoke } from '@/lib/tauri';
-import { PillarId, ReviewCounts, ReviewItem, ReviewItemType } from '@/data/types';
+import { useAppStore } from '@/store/appStore';
+import { KnowledgeGap, PillarId, ReviewCounts, ReviewItem, ReviewItemType } from '@/data/types';
 
 /** Stable djb2 hash for deriving review item IDs from question text. */
 function stableHash(input: string): string {
@@ -17,6 +18,13 @@ export function buildReviewItemId(
   question: string
 ): string {
   return `${itemType}:${pillar ?? 'none'}:${stableHash(question.trim())}`;
+}
+
+/** Deterministic id for a curriculum item, derived from its pillar + topic.
+ *  Topic strings are not unique across months, so the pillar is folded in.
+ *  Shared by the frontend and the mastery recompute payload so item_ids align. */
+export function buildCurriculumItemId(pillar: PillarId, topic: string): string {
+  return `curriculum:${pillar}:${stableHash(topic.trim())}`;
 }
 
 export function useReview() {
@@ -36,6 +44,13 @@ export function useReview() {
           content,
           quality,
         });
+        // Recompute knowledge gaps so weak/strong topics refresh immediately.
+        try {
+          const gaps = await tauriInvoke<KnowledgeGap[]>('detect_knowledge_gaps');
+          useAppStore.getState().setKnowledgeGaps(gaps);
+        } catch (gapErr) {
+          console.error('Failed to refresh knowledge gaps:', gapErr);
+        }
       } catch (err) {
         console.error('Failed to record review attempt:', err);
       }

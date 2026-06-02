@@ -1,8 +1,11 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronRight, Check, Clock, PlayCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CurriculumItem, Pillar } from '@/data/types';
+import { CurriculumItem, Pillar, PillarId } from '@/data/types';
 import { getWeekNumber } from '@/lib/utils';
+import { useAppStore } from '@/store/appStore';
+import { buildCurriculumItemId } from '@/hooks/useReview';
+import MasteryRing from './MasteryRing';
 
 interface CurriculumMonth {
   month: number;
@@ -17,6 +20,7 @@ interface CurriculumListProps {
 
 export default function CurriculumList({ curriculum, pillar }: CurriculumListProps) {
   const currentWeek = getWeekNumber();
+  const masteryByItem = useAppStore((s) => s.masteryByItem);
   const [expanded, setExpanded] = useState<Set<number>>(new Set([1, 2, 3]));
   const [itemStatuses, setItemStatuses] = useState<Record<string, CurriculumItem['status']>>({});
 
@@ -107,6 +111,8 @@ export default function CurriculumList({ curriculum, pillar }: CurriculumListPro
                       const status = itemStatuses[key] ?? item.status;
                       const weekNum = parseInt(item.week.replace('Week ', ''), 10);
                       const isCurrent = weekNum === currentWeek;
+                      const itemId = buildCurriculumItemId(pillar.id as PillarId, item.topic);
+                      const masteryScore = masteryByItem[itemId] ?? 0;
 
                       return (
                         <div
@@ -166,6 +172,9 @@ export default function CurriculumList({ curriculum, pillar }: CurriculumListPro
                               {item.resource}
                             </p>
                           </div>
+
+                          {/* Mastery ring */}
+                          <MasteryRing score={masteryScore} color={pillar.color} />
 
                           {/* Status badge */}
                           <span

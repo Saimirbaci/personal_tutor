@@ -9,6 +9,11 @@ src-tauri/target/
 # Tauri
 src-tauri/WixTools/
 
+# Android release signing — NEVER commit these
+*.jks
+*.keystore
+keystore.properties
+
 # macOS
 .DS_Store
 

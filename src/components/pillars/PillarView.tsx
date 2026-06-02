@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { MessageSquare, BookOpen, Target, Layers } from 'lucide-react';
 import { PLAN } from '@/data/plan';
-import { PillarId } from '@/data/types';
+import { CurriculumItemRef, PillarId } from '@/data/types';
 import { useAppStore } from '@/store/appStore';
+import { useMastery } from '@/hooks/useMastery';
+import { buildCurriculumItemId } from '@/hooks/useReview';
 import CurriculumList from './CurriculumList';
 import ResourceList from './ResourceList';
 import MilestoneList from './MilestoneList';
@@ -15,9 +17,28 @@ export default function PillarView() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { setView } = useAppStore();
+  const { recompute } = useMastery();
   const [activeTab, setActiveTab] = useState<Tab>('curriculum');
 
   const pillarData = PLAN.find((p) => p.pillar.id === id);
+
+  // Flatten the curriculum into (itemId, pillarId, topic) refs for recompute.
+  const masteryItems = useMemo<CurriculumItemRef[]>(() => {
+    if (!pillarData) return [];
+    const pid = pillarData.pillar.id as PillarId;
+    return pillarData.curriculum.flatMap((month) =>
+      month.items.map((item) => ({
+        itemId: buildCurriculumItemId(pid, item.topic),
+        pillarId: pid,
+        topic: item.topic,
+      }))
+    );
+  }, [pillarData]);
+
+  useEffect(() => {
+    if (!pillarData || masteryItems.length === 0) return;
+    recompute(pillarData.pillar.id as PillarId, masteryItems);
+  }, [pillarData, masteryItems, recompute]);
 
   if (!pillarData) {
     return (
