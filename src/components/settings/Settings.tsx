@@ -3,13 +3,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Save, Wifi, WifiOff, RefreshCw, Loader2, Search, X, ChevronDown,
   Server, Download, Copy, Check, Play, Square,
-  Mic, Volume2, AlertCircle, Brain, Minus, Plus,
+  Mic, Volume2, AlertCircle, Bell, Scale,
 } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
-import { MIN_ACTIVATION_LENGTH, MAX_ACTIVATION_LENGTH } from '@/store/appStore';
 import { tauriInvoke, tauriListen } from '@/lib/tauri';
-import { ProviderConfig, ProviderInfo, SttEngine, SttModel, ElevenLabsVoice, DownloadProgress } from '@/data/types';
+import { ProviderConfig, ProviderInfo, SttEngine, SttModel, ElevenLabsVoice, DownloadProgress, ForgettingNudge, RebalanceSettings } from '@/data/types';
 import { getWeekNumber } from '@/lib/utils';
+import { useDrift } from '@/hooks/useDrift';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type OllamaStatus = 'idle' | 'loading' | 'ok' | 'error';
@@ -343,6 +343,241 @@ function VoiceSettingsSection() {
               </div>
             </div>
           )}
+        </div>
+      )}
+    </motion.section>
+  );
+}
+
+// ── Learning Plan (drift + rebalance) Settings ─────────────────────────────────
+function RebalanceSettingsSection() {
+  const { loadDrift } = useDrift();
+  const [settings, setSettings] = useState<RebalanceSettings>({
+    driftThresholdDays: 7,
+    notifyOnRebalance: true,
+    autoApplyRebalance: false,
+  });
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    tauriInvoke<RebalanceSettings>('get_rebalance_settings')
+      .then((s) => {
+        setSettings(s);
+        setLoaded(true);
+      })
+      .catch(console.error);
+  }, []);
+
+  const persist = useCallback(async (next: RebalanceSettings) => {
+    setSaving(true);
+    try {
+      await tauriInvoke('set_rebalance_settings', { settings: next });
+    } catch (e) {
+      console.error('Failed to save rebalance settings:', e);
+    } finally {
+      setSaving(false);
+    }
+  }, []);
+
+  const update = (patch: Partial<RebalanceSettings>) => {
+    const next = { ...settings, ...patch };
+    setSettings(next);
+    persist(next);
+  };
+
+  const toggles: { key: keyof RebalanceSettings; label: string; desc: string }[] = [
+    {
+      key: 'notifyOnRebalance',
+      label: 'Notify when a weekly rebalance is ready',
+      desc: 'Show a desktop notification each Sunday when a new proposal is generated',
+    },
+    {
+      key: 'autoApplyRebalance',
+      label: 'Auto-apply weekly rebalance',
+      desc: 'Apply proposals automatically instead of reviewing them first (off = propose-then-apply)',
+    },
+  ];
+
+  return (
+    <motion.section
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.105 }}
+      className="rounded-xl bg-[#0f1629] border border-[#1a2540] p-5 space-y-4"
+    >
+      <div className="flex items-center gap-2">
+        <Scale size={15} className="text-[#7C3AED]" />
+        <h2 className="text-sm font-semibold text-[#e2e8f0]">Learning Plan</h2>
+      </div>
+
+      {/* Drift threshold */}
+      <div>
+        <label className="text-[10px] font-semibold text-[#4a5568] uppercase tracking-wide mb-2 block">
+          Drift threshold (days untouched)
+        </label>
+        <input
+          type="number"
+          min={1}
+          max={60}
+          value={settings.driftThresholdDays}
+          disabled={!loaded}
+          onChange={(e) => {
+            const v = parseInt(e.target.value, 10);
+            if (!Number.isNaN(v)) update({ driftThresholdDays: Math.min(Math.max(v, 1), 60) });
+          }}
+          onBlur={() => loadDrift(settings.driftThresholdDays)}
+          className="w-32 px-3 py-2 rounded-lg bg-[#080d1a] border border-[#1a2540] text-sm text-[#e2e8f0] font-mono focus:outline-none focus:border-[#7C3AED] disabled:opacity-50"
+        />
+        <p className="text-[10px] text-[#4a5568] mt-1">
+          A pillar shows a catch-up prompt on the Dashboard after this many days without activity.
+        </p>
+      </div>
+
+      {/* Toggles */}
+      <div className="space-y-2">
+        {toggles.map(({ key, label, desc }) => (
+          <div
+            key={key}
+            className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-[#080d1a] border border-[#1a2540]"
+          >
+            <div>
+              <p className="text-xs text-[#e2e8f0]">{label}</p>
+              <p className="text-[10px] text-[#4a5568]">{desc}</p>
+            </div>
+            <button
+              onClick={() => update({ [key]: !settings[key] } as Partial<RebalanceSettings>)}
+              disabled={!loaded}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0 disabled:opacity-50 ${
+                settings[key] ? 'bg-[#7C3AED]' : 'bg-[#1a2540]'
+              }`}
+            >
+              <span
+                className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${
+                  settings[key] ? 'translate-x-4' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {saving && <p className="text-[10px] text-[#4a5568]">Saving…</p>}
+    </motion.section>
+  );
+}
+
+// ── Forgetting Curve Reminders ─────────────────────────────────────────────────
+type TestStatus = 'idle' | 'sending' | 'sent' | 'none' | 'error';
+
+function clampHour(n: number): number {
+  return Math.min(23, Math.max(0, Math.floor(Number.isFinite(n) ? n : 0)));
+}
+
+function ForgettingCurveSection() {
+  const { forgettingCurveSettings: settings, setForgettingCurveSettings } = useAppStore();
+  const [testStatus, setTestStatus] = useState<TestStatus>('idle');
+
+  const handleTestReminder = async () => {
+    setTestStatus('sending');
+    try {
+      // Large lookahead so any tracked-but-decaying item surfaces for QA.
+      const nudges = await tauriInvoke<ForgettingNudge[]>('get_forgetting_curve_due', {
+        lookaheadMin: 60 * 24 * 365,
+        maxItems: 1,
+      });
+      if (nudges.length === 0) {
+        setTestStatus('none');
+        return;
+      }
+      const n = nudges[0];
+      await tauriInvoke('schedule_notification', { title: n.title, body: n.body, hour: 0, minute: 0 });
+      setTestStatus('sent');
+    } catch (err) {
+      console.error('Test reminder failed:', err);
+      setTestStatus('error');
+    }
+  };
+
+  const numberField = (
+    label: string,
+    value: number,
+    onChange: (v: number) => void,
+    opts: { min: number; max?: number } = { min: 0 }
+  ) => (
+    <div>
+      <label className="text-[10px] text-[#4a5568] uppercase tracking-wide mb-1 block">{label}</label>
+      <input
+        type="number"
+        value={value}
+        min={opts.min}
+        max={opts.max}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full px-3 py-2 rounded-lg bg-[#080d1a] border border-[#1a2540] text-sm text-[#e2e8f0] font-mono focus:outline-none focus:border-[#2E5FA3]"
+      />
+    </div>
+  );
+
+  return (
+    <motion.section
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.115 }}
+      className="rounded-xl bg-[#0f1629] border border-[#1a2540] p-5 space-y-4"
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Bell size={15} className="text-[#C9A84C]" />
+          <h2 className="text-sm font-semibold text-[#e2e8f0]">Forgetting Curve Reminders</h2>
+        </div>
+        <button
+          onClick={() => setForgettingCurveSettings({ enabled: !settings.enabled })}
+          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+            settings.enabled ? 'bg-[#C9A84C]' : 'bg-[#1a2540]'
+          }`}
+        >
+          <span
+            className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${
+              settings.enabled ? 'translate-x-4' : 'translate-x-1'
+            }`}
+          />
+        </button>
+      </div>
+
+      <p className="text-[11px] text-[#4a5568]">
+        Get a nudge right when a concept is about to slip — timed to each item's decay, not on a
+        fixed schedule. Reminders only fire while the app is open.
+      </p>
+
+      {settings.enabled && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            {numberField('Quiet hours start (24h)', settings.quietHoursStart, (v) =>
+              setForgettingCurveSettings({ quietHoursStart: clampHour(v) }), { min: 0, max: 23 })}
+            {numberField('Quiet hours end (24h)', settings.quietHoursEnd, (v) =>
+              setForgettingCurveSettings({ quietHoursEnd: clampHour(v) }), { min: 0, max: 23 })}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {numberField('Max reminders / day', settings.dailyCap, (v) =>
+              setForgettingCurveSettings({ dailyCap: Math.max(0, Math.floor(v || 0)) }), { min: 0 })}
+            {numberField('Check interval (min)', settings.pollMinutes, (v) =>
+              setForgettingCurveSettings({ pollMinutes: Math.max(1, Math.floor(v || 1)) }), { min: 1 })}
+          </div>
+
+          <div className="flex items-center gap-3 pt-1">
+            <button
+              onClick={handleTestReminder}
+              disabled={testStatus === 'sending'}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg border border-[#C9A84C]/40 text-sm text-[#C9A84C] hover:bg-[#C9A84C]/10 transition-all disabled:opacity-50"
+            >
+              {testStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> : <Bell size={14} />}
+              Send a test reminder now
+            </button>
+            {testStatus === 'sent' && <span className="text-xs text-green-400">Sent ✓</span>}
+            {testStatus === 'none' && <span className="text-xs text-[#4a5568]">Nothing due to review yet</span>}
+            {testStatus === 'error' && <span className="text-xs text-red-400">Failed — check notification permission</span>}
+          </div>
         </div>
       )}
     </motion.section>
@@ -765,81 +1000,6 @@ function OpenRouterModelPicker({ models, value, onChange }: ModelPickerProps) {
   );
 }
 
-// ── Learning Settings Section ───────────────────────────────────────────────────
-function LearningSettingsSection() {
-  const activationQuizEnabled = useAppStore((s) => s.activationQuizEnabled);
-  const activationQuizLength = useAppStore((s) => s.activationQuizLength);
-  const setActivationQuizEnabled = useAppStore((s) => s.setActivationQuizEnabled);
-  const setActivationQuizLength = useAppStore((s) => s.setActivationQuizLength);
-
-  return (
-    <motion.section
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.13 }}
-      className="rounded-xl bg-[#0f1629] border border-[#1a2540] p-5 space-y-4"
-    >
-      <div className="flex items-center gap-2">
-        <Brain size={15} className="text-[#2E5FA3]" />
-        <h2 className="text-sm font-semibold text-[#e2e8f0]">Learning</h2>
-      </div>
-
-      {/* Enable toggle */}
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-xs text-[#e2e8f0]">Pre-session activation quiz</p>
-          <p className="text-[10px] text-[#4a5568] mt-0.5">
-            Recall the previous session's material before loading new content.
-          </p>
-        </div>
-        <button
-          onClick={() => setActivationQuizEnabled(!activationQuizEnabled)}
-          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0 ${
-            activationQuizEnabled ? 'bg-[#2E5FA3]' : 'bg-[#1a2540]'
-          }`}
-        >
-          <span
-            className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${
-              activationQuizEnabled ? 'translate-x-4' : 'translate-x-1'
-            }`}
-          />
-        </button>
-      </div>
-
-      {/* Length stepper */}
-      {activationQuizEnabled && (
-        <div className="flex items-center justify-between gap-3 pt-1 border-t border-[#1a2540]">
-          <div>
-            <p className="text-xs text-[#e2e8f0]">Questions per quiz</p>
-            <p className="text-[10px] text-[#4a5568] mt-0.5">
-              Between {MIN_ACTIVATION_LENGTH} and {MAX_ACTIVATION_LENGTH}.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setActivationQuizLength(activationQuizLength - 1)}
-              disabled={activationQuizLength <= MIN_ACTIVATION_LENGTH}
-              className="w-7 h-7 rounded-lg border border-[#1a2540] flex items-center justify-center text-[#e2e8f0] hover:bg-[#1a2540] transition-all disabled:opacity-40"
-            >
-              <Minus size={13} />
-            </button>
-            <span className="w-6 text-center text-sm font-mono text-[#e2e8f0]">
-              {activationQuizLength}
-            </span>
-            <button
-              onClick={() => setActivationQuizLength(activationQuizLength + 1)}
-              disabled={activationQuizLength >= MAX_ACTIVATION_LENGTH}
-              className="w-7 h-7 rounded-lg border border-[#1a2540] flex items-center justify-center text-[#e2e8f0] hover:bg-[#1a2540] transition-all disabled:opacity-40"
-            >
-              <Plus size={13} />
-            </button>
-          </div>
-        </div>
-      )}
-    </motion.section>
-  );
-}
-
 // ── Main Settings Component ───────────────────────────────────────────────────
 export default function Settings() {
   const { providerConfig, setProviderConfig } = useAppStore();
@@ -1251,11 +1411,14 @@ export default function Settings() {
           <p className="text-xs text-[#4a5568]">{Math.max(12 - week, 0)} weeks remaining</p>
         </motion.section>
 
-        {/* ── Learning ────────────────────────────────────────────────────── */}
-        <LearningSettingsSection />
+        {/* ── Learning Plan (drift + rebalance) ───────────────────────────── */}
+        <RebalanceSettingsSection />
 
         {/* ── Voice ───────────────────────────────────────────────────────── */}
         <VoiceSettingsSection />
+
+        {/* ── Forgetting Curve Reminders ──────────────────────────────────── */}
+        <ForgettingCurveSection />
 
         {/* ── WiFi Sync ───────────────────────────────────────────────────── */}
         <WifiSyncSection />

@@ -29,12 +29,34 @@ pub async fn command_name(
 ## Database (rusqlite)
 Two access patterns coexist — pick one consistently per command file:
 - **Shared `DbState(pub Mutex<Connection>)`** — preferred for write-heavy or transactional flows. Always `lock().map_err(|e| e.to_string())?` — never `.unwrap()`. Lock for the shortest possible scope; extract data and release before any `await`.
-- **Per-call `db::get_connection(&app)`** — opens a fresh `Connection` (used by `review.rs`, `digest.rs`). Safe under WAL for short reads/writes; useful for synchronous `#[tauri::command] pub fn` handlers that don't share state, or for async commands that must release the connection before a long `await` (e.g. an AI call).
+- **Per-call `db::get_connection(&app)`** — opens a fresh `Connection` (used by `review.rs` and `rebalance.rs`). Safe under WAL for short reads/writes; useful for synchronous `#[tauri::command] pub fn` handlers that don't share state.
 
 Rules that apply to both:
 - Use parameterized queries exclusively: `params![val1, val2]`
 - Handle `rusqlite::Error::QueryReturnedNoRows` explicitly (map to `None` or 404)
-- Tables: `sessions`, `milestones`, `settings`, `conversations`, `chat_messages`, `review_items`, `conversation_summaries`, `weekly_digests`
+- Tables: `sessions`, `milestones`, `settings`, `conversations`, `chat_messages`, `review_items`, `plan_adjustments`
+
+## Schema Migrations
+- `CREATE TABLE IF NOT EXISTS` only creates new tables — it cannot add a column to a pre-existing table. New columns go through `db/mod.rs::run_migrations()`, which runs after table creation in `init()`.
+- Add columns with the `add_column_if_missing(conn, table, column, alter_sql)` helper — it checks `PRAGMA table_info` rather than swallowing a duplicate-column error.
+- Every migration must be idempotent (safe to re-run on an already-migrated DB).
+
+```rust
+fn run_migrations(conn: &Connection) -> Result<()> {
+    add_column_if_missing(
+        conn,
+        "review_items",
+        "last_notified_at",
+        "ALTER TABLE review_items ADD COLUMN last_notified_at TEXT",
+    )?;
+    Ok(())
+}
+```
+
+## Pure Logic for Testability
+- Extract ranking/scoring/formatting out of `#[tauri::command]` handlers into pure functions that take plain rows + a clock value (e.g. `build_nudges(rows, now, max)`, `retention(...)`), so they unit-test without `AppHandle`/SQLite.
+- The command handler stays thin: open the connection, query rows into a private struct (e.g. `NudgeRow`), then call the pure function.
+- Inject "now" as a parameter (`now: DateTime<Local>`) instead of calling `Local::now()` inside the pure function — lets tests pin a fixed timestamp.
 
 ```rust
 // Good — brief lock, no await while holding
@@ -61,7 +83,8 @@ window.emit("ai-error", error_message)?;
 ```
 Always emit `ai-done` or `ai-error` — never leave the frontend in a streaming state.
 
-For background AI tasks (weekly digests, session summaries) that must NOT touch the live-chat event stream, use the `pub(crate) collect_completion(messages, system, config, timeout_secs)` helper in `commands/ai.rs` instead. It buffers every token into a single `String` and returns it without emitting `ai-token`/`ai-done`/`ai-error`, so it can run concurrently with live chat.
+### Non-Streaming Background AI
+For background features that need an AI rationale without touching the live chat stream (e.g. plan rebalancing), use `collect_completion(messages, system, config, timeout_secs)` in `commands/ai.rs`. It reuses the provider's `stream_completion` plumbing but collects tokens into a buffer via an mpsc channel instead of emitting them to the UI, bounded by a timeout. Returns the full text as `Result<String, String>`.
 
 ## AI Provider Trait
 ```rust

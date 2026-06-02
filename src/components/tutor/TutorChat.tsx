@@ -171,6 +171,11 @@ export default function TutorChat() {
     setPendingPrompt: s.setPendingPrompt,
   }));
 
+  const { pendingPrompt, setPendingPrompt } = useAppStore((s) => ({
+    pendingPrompt: s.pendingPrompt,
+    setPendingPrompt: s.setPendingPrompt,
+  }));
+
   const { sendMessage, clearMessages } = useAI();
   const {
     loadConversationList,
@@ -243,6 +248,17 @@ export default function TutorChat() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingContent]);
+
+  // Consume a queued prompt (e.g. a drift catch-up drill) once, after mount.
+  const pendingSentRef = useRef(false);
+  useEffect(() => {
+    if (pendingPrompt && !pendingSentRef.current && !isStreaming) {
+      pendingSentRef.current = true;
+      const prompt = pendingPrompt;
+      setPendingPrompt(null);
+      sendMessage(prompt, selectedPillar ?? undefined);
+    }
+  }, [pendingPrompt, isStreaming, sendMessage, selectedPillar, setPendingPrompt]);
 
   // TTS: auto-speak the last assistant message when streaming finishes
   useEffect(() => {

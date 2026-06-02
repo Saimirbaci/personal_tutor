@@ -5,6 +5,7 @@ pub mod digest;
 pub mod gaps;
 pub mod mastery;
 pub mod progress;
+pub mod rebalance;
 pub mod review;
 pub mod schedule;
 pub mod summaries;

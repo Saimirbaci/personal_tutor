@@ -27,13 +27,12 @@ Rust Backend (Tauri v2 + rusqlite + Tokio)
     ├── lib.rs               → App entry, plugin registration, command registration
     ├── db/mod.rs            → DbState(Mutex<Connection>), schema init, WAL mode
     ├── commands/            → Tauri command handlers (grouped by domain)
-    │   ├── ai.rs            → stream_chat, get_providers, model listing, save_provider_config
+    │   ├── ai.rs            → stream_chat, get_providers, model listing, save_provider_config, collect_completion (non-streaming AI for background features)
     │   ├── conversations.rs → CRUD + bulk_import_sync
     │   ├── progress.rs      → log_session, get_progress, get_streak, update_milestone
     │   ├── review.rs        → SM-2 spaced repetition (record_review_attempt, get_due_reviews, get_review_counts)
-    │   ├── summaries.rs     → save_conversation_summary, get_conversation_summary, list_recent_summaries, seed_review_items_from_summary
-    │   ├── digest.rs        → weekly digest (generate_weekly_digest, get_weekly_digests, maybe_generate_due_digest, export_weekly_digest)
-    │   ├── schedule.rs      → get_today_schedule, schedule_notification, get_morning_briefing
+    │   ├── rebalance.rs     → drift detection + adaptive plan rebalancing (get_pillar_drift, generate/apply/dismiss_plan_adjustment, maybe_generate_due_rebalance, get/set_rebalance_settings)
+    │   ├── schedule.rs      → get_today_schedule, schedule_notification
     │   ├── sync_server.rs   → Axum-based local sync server (start/stop/status)
     │   └── voice.rs         → STT model management, transcribe_audio, ElevenLabs TTS
     └── ai/                  → LLM provider implementations
@@ -68,12 +67,10 @@ All AI responses stream via Tauri events — never polled:
 
 The `useAI` hook in `src/hooks/useAI.ts` handles event subscriptions and calls the `stream_chat` Tauri command.
 
-Background AI tasks (session summaries, weekly digests) use the shared `collect_completion(messages, system, config, timeout_secs)` helper in `ai.rs`, which buffers tokens silently and returns the final text without emitting `ai-token`/`ai-done`/`ai-error` events. This allows them to run concurrently with live chat without interfering with the streaming UI. `summarize_conversation` (in `ai.rs`) is a thin wrapper over `collect_completion`.
-
 ## State Management
 Single Zustand store in `src/store/appStore.ts` with `persist` middleware.
 Persisted keys: `providerConfig`, `voiceConfig`, `sidebarCollapsed`, `activePillar`.
-Ephemeral: all messages, streaming state, conversation list, progress data, `pendingPrompt` (queued reflection reply), `weeklyDigests` + `selectedDigestWeek` (digest list and UI selection, never persisted).
+Ephemeral: all messages, streaming state, conversation list, progress data, `pillarDrift`, `planAdjustments`, `pendingPrompt` (NOT persisted).
 
 ## Database (rusqlite)
 SQLite at `{app_data_dir}/tutor.db`. WAL mode, foreign keys ON.
@@ -82,13 +79,12 @@ SQLite at `{app_data_dir}/tutor.db`. WAL mode, foreign keys ON.
 - **`conversations`** — chat conversation metadata (pillar, title)
 - **`chat_messages`** — individual messages (role, content, genui JSON)
 - **`review_items`** — SM-2 spaced repetition state (item_id, item_type, pillar, ease_factor, interval_days, repetitions, next_due)
-- **`conversation_summaries`** — post-session summary notes (takeaways, reflection, flagged review items, model, timestamps)
-- **`weekly_digests`** — auto-generated weekly learning summaries (week_start UNIQUE, week_end, week_number, content, metrics JSON, created_at); index `idx_weekly_digests_week_start` on `week_start DESC`
-- **`settings`** — key/value store
+- **`plan_adjustments`** — weekly rebalance proposals (week_start UNIQUE, week_number, rationale, adjustments JSON, status proposed/applied/dismissed, applied_at)
+- **`settings`** — key/value store (also holds rebalance settings, e.g. `drift_threshold_days`)
 
 Two DB access patterns coexist:
 - `DbState(Mutex<Connection>)` — shared connection, locked per call (used by most commands)
-- `db::get_connection(&app)` — opens a fresh `rusqlite::Connection` per call (used by `review.rs`, `digest.rs`); safe under WAL but bypasses the shared mutex
+- `db::get_connection(&app)` — opens a fresh `rusqlite::Connection` per call (used by `review.rs`); safe under WAL but bypasses the shared mutex
 
 ## Sync Server
 Axum HTTP server on a local port (start/stop via Tauri commands). Used to sync conversations from mobile/web to desktop. `SyncServerHandle(Mutex<Option<...>>)` managed as Tauri app state.
@@ -108,7 +104,7 @@ Default: `anthropic / claude-sonnet-4-5`.
 
 ## Key Types
 All TypeScript interfaces in `src/data/types.ts`. Match Rust serde structs exactly (camelCase).
-Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`, `MorningBriefing`, `ConversationSummary`, `FlaggedReviewItem`, `SessionSummaryData`, `WeeklyDigest`, `DigestMetrics`.
+Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`, `PillarDrift`, `DriftReport`, `PillarStatus`, `AdjustmentStatus`, `PillarAdjustment`, `PlanAdjustment`, `RebalanceSettings`.
 
 ## Spaced Repetition
 SM-2 algorithm in `src-tauri/src/commands/review.rs`. Quality grades 0–5 (≥3 passes). Failed reviews reset interval to 1 day; ease factor floored at 1.3.
@@ -117,25 +113,14 @@ SM-2 algorithm in `src-tauri/src/commands/review.rs`. Quality grades 0–5 (≥3
 - `Flashcard` and `Quiz` GenUI renderers call `recordAttempt` on user interaction
 - `ReviewWidget` on the Dashboard surfaces due-count
 
-## Post-Session Summaries
-AI-generated structured notes at the end of each chat session, capturing key takeaways, a reflection question, and flagged flashcards/quizzes for spaced repetition.
-- Frontend hook: `useSessionSummary` — calls `runSessionSummary(conversationId)` to generate/fetch summary
-- Read-only hook: `useConversationSummary(conversationId)` — displays existing summary with loading state
-- Tauri commands: `get_conversation_summary`, `save_conversation_summary`, `list_recent_summaries`, `seed_review_items_from_summary` (in `summaries.rs`); `summarize_conversation` (in `ai.rs`)
-- Zustand: `pendingPrompt` state + `setPendingPrompt` action for queuing reflection replies
-- Automatic triggers: window close (beforeunload), conversation switch, new conversation, startup backfill
-- UI: `SummaryCard` component renders takeaways/reflection/flagged items, shown in ProgressView and at top of active conversation
-- Prompt: `SESSION_SUMMARY_PROMPT` in `src/lib/genui.ts` instructs the model to emit a single `<genui type="session-summary">` block
-
-## Weekly Digest
-Auto-generated weekly learning report covering session stats, pillar mastery deltas, knowledge gaps, and AI-written recommendations for the next week.
-- Frontend hook: `useWeeklyDigest` — `loadDigests(limit=12)`, `generate(weekStart?)`, `maybeGenerateDue()` (on-launch catch-up), `exportDigest(weekStart)` (markdown export to disk)
-- Tauri commands (in `digest.rs`): `generate_weekly_digest`, `get_weekly_digests`, `maybe_generate_due_digest`, `export_weekly_digest`. Uses the per-call `db::get_connection(&app)` pattern (like `review.rs`) and the `collect_completion` helper for AI generation; `export_weekly_digest` writes via `tokio::fs::write`.
-- Database: `weekly_digests` table keyed by `week_start` (Monday, `UNIQUE`); `metrics` is a JSON blob of `DigestMetrics` (totalHours, hoursByPillar, sessionsCount, streak, pillarsCovered, topGaps, recommendedFocus)
-- Week boundaries: Monday–Sunday; `most_recent_completed_week()` treats Sunday as the completion trigger. Sprint week number 1–12 aligns with `schedule.rs::get_week_number` (sprint start 2026-06-01)
-- Zustand ephemeral state: `weeklyDigests` (list) + `selectedDigestWeek` (UI selection); actions `setWeeklyDigests` / `setSelectedDigestWeek` — never persisted
-- UI: `WeeklyDigestCard` component (in `src/components/progress/`, rendered by `ProgressView`) shows the digest markdown, a past-week selector, and regenerate/export controls
-- Automatic trigger: App.tsx on-launch effect calls `maybeGenerateDue()` then `loadDigests()`, guarded by a `useRef` against StrictMode double-mount. Idempotent on the backend via `UNIQUE(week_start)`
+## Drift Detection & Adaptive Rebalancing
+"Drift" = Growth Pillars that have planned hours but no recent activity (older than the drift threshold, default 7 days). Logic lives in `src-tauri/src/commands/rebalance.rs` (per-call `db::get_connection` pattern, like `review.rs`). Pure helpers `compute_drift`, `compute_rebalance`, and `load_applied_adjustments` are unit-tested.
+- **Weekly flow**: `generate_plan_rebalance` builds a `PlanAdjustment` (one per `week_start`, persisted in `plan_adjustments`) — shifting minutes toward behind pillars and trimming ahead ones, with an AI-written rationale via `collect_completion`. The user resolves it with `apply_plan_adjustment(weekStart)` or `dismiss_plan_adjustment(weekStart)`.
+- **Schedule reweighting**: `get_today_schedule(app, date)` applies the single *applied* proposal (via `load_applied_adjustments`) to reweight today's blocks (bounded 15–120 min) and may inject a 30-min catch-up block for the most-behind pillar absent from today.
+- **Tutor handoff**: the `DriftCatchUpCard` "Catch up" action sets the one-shot `pendingPrompt` and navigates to the tutor; `TutorChat` consumes `pendingPrompt` once on mount to seed a catch-up drill.
+- **On launch**: `App.tsx` calls `maybe_generate_due_rebalance` once (idempotent — ensures the Sunday proposal exists).
+- Frontend hooks: `useDrift` (`loadDrift`, auto-loads on mount), `usePlanRebalance` (`loadAdjustments`, `generate`, `apply`, `dismiss`, `maybeGenerateDue`)
+- Components: `DriftCatchUpCard` (Dashboard), `PlanRebalanceCard` (ProgressView — on apply calls `usePlan().loadSchedule()` to reconcile), `RebalanceSettingsSection` in Settings (drift threshold days, notifyOnRebalance, autoApplyRebalance — persisted via `set_rebalance_settings`)
 
 ## Tauri IPC Layer
 `src/lib/tauri.ts` provides `tauriInvoke()` and `tauriListen()` wrappers with browser fallback mocks for dev server testing without full Tauri.

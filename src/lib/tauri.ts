@@ -32,23 +32,7 @@ export async function tauriEmit(event: string, payload?: unknown): Promise<void>
 }
 
 // Mock data for browser development
-function getMockData<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  // Mastery: derive varied scores from the passed curriculum item refs so the
-  // rings line up with the real list items in dev (no Rust backend).
-  if (cmd === 'recompute_mastery' || cmd === 'get_mastery_scores') {
-    const items = (args?.items as Array<{ itemId: string; pillarId: string; topic: string }>) ?? [];
-    const sample = items.map((item, i) => ({
-      pillarId: item.pillarId,
-      itemId: item.itemId,
-      score: [82, 47, 18, 95, 63, 34][i % 6],
-      quizAccuracy: 0.7,
-      easeNorm: 0.6,
-      depthNorm: 0.4,
-      updatedAt: new Date().toISOString(),
-    }));
-    return Promise.resolve(sample as T);
-  }
-
+function getMockData<T>(cmd: string, _args?: Record<string, unknown>): Promise<T> {
   const mocks: Record<string, unknown> = {
     get_providers: [
       {
@@ -94,54 +78,27 @@ function getMockData<T>(cmd: string, args?: Record<string, unknown>): Promise<T>
     record_review_attempt: null,
     get_due_reviews: [],
     get_review_counts: { total: 0, due: 0, dueToday: 0 },
-    get_knowledge_gaps: [
-      {
-        gapId: 'mock-1',
-        pillar: 'llm',
-        topicKey: 'abc123',
-        label: 'What is the key equation in scaled dot-product attention?',
-        severity: 0.82,
-        signals: [
-          { kind: 'weak_quiz', detail: 'Last answered at quality 1/5', weight: 0.66 },
-          { kind: 'low_ease', detail: 'Ease factor 1.45 — hard to retain', weight: 0.16 },
-        ],
-        status: 'open',
-        firstDetectedAt: new Date().toISOString(),
-        lastUpdatedAt: new Date().toISOString(),
-        dismissedUntil: null,
-        lastDrilledAt: null,
-      },
-      {
-        gapId: 'mock-2',
-        pillar: 'sales',
-        topicKey: '_pillar',
-        label: 'Shallow engagement',
-        severity: 0.4,
-        signals: [
-          { kind: 'shallow_chat', detail: '6 short messages (avg 40 chars) with little active recall', weight: 0.4 },
-        ],
-        status: 'open',
-        firstDetectedAt: new Date().toISOString(),
-        lastUpdatedAt: new Date().toISOString(),
-        dismissedUntil: null,
-        lastDrilledAt: null,
-      },
-    ],
-    detect_knowledge_gaps: [],
-    dismiss_gap: null,
-    mark_gap_drilled: null,
+    get_forgetting_curve_due: [],
+    mark_review_notified: null,
     update_milestone: null,
     save_provider_config: null,
     schedule_notification: null,
-    get_conversation_summary: null,
-    list_recent_summaries: [],
-    save_conversation_summary: null,
-    seed_review_items_from_summary: [],
-    summarize_conversation: '',
-    get_weekly_digests: [],
-    maybe_generate_due_digest: null,
-    generate_weekly_digest: null,
-    export_weekly_digest: '',
+    get_pillar_drift: {
+      thresholdDays: 7,
+      generatedAt: new Date().toISOString(),
+      drifted: [],
+    },
+    get_plan_adjustments: [],
+    maybe_generate_due_rebalance: null,
+    generate_plan_rebalance: null,
+    apply_plan_adjustment: null,
+    dismiss_plan_adjustment: null,
+    get_rebalance_settings: {
+      driftThresholdDays: 7,
+      notifyOnRebalance: true,
+      autoApplyRebalance: false,
+    },
+    set_rebalance_settings: null,
   };
 
   return Promise.resolve((mocks[cmd] ?? null) as T);

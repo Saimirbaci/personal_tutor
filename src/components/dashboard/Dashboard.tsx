@@ -2,7 +2,6 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Zap } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
-import { PillarId } from '@/data/types';
 import { usePlan } from '@/hooks/usePlan';
 import { useMobile } from '@/hooks/useMobile';
 import { getGreeting, getWeekNumber } from '@/lib/utils';
@@ -10,27 +9,19 @@ import TodayCard from './TodayCard';
 import PillarProgress from './PillarProgress';
 import StreakWidget from './StreakWidget';
 import ReviewWidget from './ReviewWidget';
-import MorningBriefing from './MorningBriefing';
+import DriftCatchUpCard from './DriftCatchUpCard';
+import ForgettingCurveCard from './ForgettingCurveCard';
 
 export default function Dashboard() {
   const { currentBlock, todaySchedule } = usePlan();
   const { setView } = useAppStore();
-  const activationQuizEnabled = useAppStore((s) => s.activationQuizEnabled);
-  const startActivation = useAppStore((s) => s.startActivation);
   const navigate = useNavigate();
   const greeting = getGreeting();
   const week = getWeekNumber();
   const isMobile = useMobile();
 
   const handleJumpIn = () => {
-    if (!currentBlock) return;
-    const pillar = currentBlock.pillar as PillarId;
-    if (activationQuizEnabled) {
-      // Show the pre-session activation quiz first; it routes onward to the tutor
-      // (or skips itself when there is nothing to recall).
-      startActivation(pillar);
-      navigate('/activation');
-    } else {
+    if (currentBlock) {
       setView('tutor');
       navigate('/tutor');
     }
@@ -67,8 +58,14 @@ export default function Dashboard() {
           )}
         </motion.div>
 
-        {/* Morning briefing */}
-        <MorningBriefing />
+        {/* Drift catch-up surface (hidden when nothing is drifting) */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.04 }}
+        >
+          <DriftCatchUpCard />
+        </motion.div>
 
         {/* Today's schedule */}
         <motion.div
@@ -90,6 +87,15 @@ export default function Dashboard() {
           transition={{ duration: 0.3, delay: 0.08 }}
         >
           <ReviewWidget />
+        </motion.div>
+
+        {/* About-to-forget (forgetting-curve) */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.09 }}
+        >
+          <ForgettingCurveCard />
         </motion.div>
 
         {/* Pillar progress row */}

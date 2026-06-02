@@ -10,8 +10,8 @@
 - Single store: `src/store/appStore.ts` — do not create additional stores
 - All AI streaming state lives in the store: `messages`, `isStreaming`, `streamingContent`, `currentToken`
 - Never store derived data in the store — compute with selectors
-- Persisted keys: `providerConfig`, `voiceConfig`, `sidebarCollapsed`, `activePillar`
-- Ephemeral keys loaded from the backend (never persisted): `weeklyDigests`, `selectedDigestWeek` (owned by `useWeeklyDigest`)
+- Persisted keys: `providerConfig`, `voiceConfig`, `forgettingCurveSettings`, `sidebarCollapsed`, `activePillar`
+- Ephemeral (NOT persisted) drift/rebalance keys: `pillarDrift`, `planAdjustments`, `pendingPrompt` — `pendingPrompt` is a one-shot queued for the tutor (e.g. a drift catch-up drill), consumed once after the tutor mounts
 - Use `useAppStore` hook — always select only what the component needs:
 
 ```typescript
@@ -43,17 +43,17 @@ useEffect(() => {
 - AI interactions: `useAI` — builds system prompt, calls `stream_chat`, manages Tauri event subscriptions
 - Voice: `useVoice` — calls `transcribe_audio`, `tts_elevenlabs`, model status/download
 - Progress: `useProgress` — calls `log_session`, `get_progress`, `get_streak`
-- Session summaries: `useSessionSummary` (imperative, triggers summary generation), `useConversationSummary` (read-only, displays existing summary)
-- Weekly digests: `useWeeklyDigest` — `loadDigests`, `generate`, `maybeGenerateDue` (on-launch catch-up), `exportDigest`; owns all digest Tauri calls and writes to the ephemeral `weeklyDigests` store state
+- Drift: `useDrift` — `loadDrift(thresholdDays?)` calls `get_pillar_drift`, stores the `DriftReport` (auto-loads on mount)
+- Rebalance: `usePlanRebalance` — `loadAdjustments`, `generate`, `apply(weekStart)`, `dismiss(weekStart)`, `maybeGenerateDue` wrap the plan-rebalance commands
+- Forgetting curve: `useForgettingCurve` — in-app poll that fires OS nudges (quiet-hours + daily-cap gated); `useForgettingNudgePreview` is a read-only fetch that must NOT call `mark_review_notified`
+- Background polls/timers must guard against React StrictMode double-mount (e.g. a `startedRef`) and clear their interval on cleanup
 - Never call `tauriInvoke` directly inside React components
 
 ## Types
 - All shared TypeScript interfaces in `src/data/types.ts` — single source of truth
 - Mirror Rust serde structs exactly (camelCase after `#[serde(rename_all = "camelCase")]`)
 - Use `PillarId` type everywhere — never raw strings for pillar identifiers
-- `GenUIBlock.type` is a discriminated union (now includes 'session-summary') — use it in switch statements
-- `ConversationSummary` — AI-generated session notes (takeaways, reflection, flagged items); `SessionSummaryData` — model-emitted GenUI payload
-- `WeeklyDigest` — auto-generated weekly report (`weekStart`/`weekEnd` as `YYYY-MM-DD`, `weekNumber`, markdown `content`, `metrics`, `createdAt`); `DigestMetrics` — computed stats (`totalHours`, `hoursByPillar`, `sessionsCount`, `streak`, `pillarsCovered`, `topGaps`, `recommendedFocus`). Both mirror the Rust structs in `digest.rs`.
+- `GenUIBlock.type` is a discriminated union — use it in switch statements
 
 ```typescript
 // GenUI rendering pattern
@@ -65,8 +65,7 @@ switch (block.type) {
 ```
 
 ## Styling (Tailwind v3)
-- Tailwind utility classes exclusively — no CSS modules or component-scoped CSS files
-- Inline styles allowed only for dynamic values (e.g. pillar colors from data) that cannot be expressed as Tailwind utility classes
+- Tailwind utility classes exclusively — no inline styles, no CSS modules
 - Dark mode: use `dark:` prefix classes (Tailwind dark mode configured)
 - Animation: Framer Motion for transitions — not CSS keyframes
 - Pillar colors are defined in `src/data/pillars.ts` as `Pillar.color` and `Pillar.colorMuted`

@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
@@ -22,52 +20,12 @@ pub struct ProviderInfo {
     pub base_url: Option<String>,
 }
 
-pub(crate) fn make_provider(config: ProviderConfig) -> Box<dyn AiProvider> {
+fn make_provider(config: ProviderConfig) -> Box<dyn AiProvider> {
     match config.provider.as_str() {
         "ollama" => Box::new(OllamaProvider::new(config)),
         "openrouter" => Box::new(OpenRouterProvider::new(config)),
         "google" => Box::new(GoogleProvider::new(config)),
         _ => Box::new(AnthropicProvider::new(config)),
-    }
-}
-
-/// Run an AI provider to completion, COLLECTING every token into a single String
-/// instead of emitting `ai-token`/`ai-done`/`ai-error` events.
-///
-/// This lets background tasks (session summaries, weekly digests) generate text
-/// concurrently with the live chat UI without clobbering its global event listeners.
-/// Bounded by `timeout_secs`.
-pub(crate) async fn collect_completion(
-    messages: Vec<AiMessage>,
-    system: Option<String>,
-    config: ProviderConfig,
-    timeout_secs: u64,
-) -> Result<String, String> {
-    let provider = make_provider(config);
-
-    let (tx, mut rx) = mpsc::channel::<String>(256);
-
-    // Collector task: concatenate every token into the final response.
-    let collector = tokio::spawn(async move {
-        let mut buf = String::new();
-        while let Some(token) = rx.recv().await {
-            buf.push_str(&token);
-        }
-        buf
-    });
-
-    let completion = provider.stream_completion(messages, system, tx);
-
-    match tokio::time::timeout(Duration::from_secs(timeout_secs), completion).await {
-        Ok(Ok(())) => collector.await.map_err(|e| e.to_string()),
-        Ok(Err(e)) => {
-            collector.abort();
-            Err(e.to_string())
-        }
-        Err(_) => {
-            collector.abort();
-            Err("AI generation timed out".to_string())
-        }
     }
 }
 
@@ -103,23 +61,40 @@ pub async fn stream_chat(
     }
 }
 
-/// One-shot, NON-streaming completion used for background tasks (e.g. session summaries).
+/// Runs a single non-streaming completion and returns the full text.
 ///
-/// Unlike `stream_chat`, this never emits `ai-token`/`ai-done`/`ai-error` events, so it can
-/// run concurrently with the live chat UI without clobbering its listeners. It buffers the
-/// provider's token stream into a single String and returns it. Bounded by a 45s timeout.
-#[tauri::command]
-pub async fn summarize_conversation(
-    transcript: String,
+/// Internally reuses the streaming provider plumbing — tokens are collected
+/// into a buffer rather than emitted to the UI. Used by background features
+/// (e.g. weekly plan rebalancing) that need an AI rationale without touching
+/// the live chat stream. Bounded by `timeout_secs` so a hung provider can't
+/// block app launch.
+pub async fn collect_completion(
+    messages: Vec<AiMessage>,
     system: Option<String>,
     config: ProviderConfig,
+    timeout_secs: u64,
 ) -> Result<String, String> {
-    let messages = vec![AiMessage {
-        role: "user".to_string(),
-        content: transcript,
-    }];
+    let provider = make_provider(config);
+    let (tx, mut rx) = mpsc::channel::<String>(256);
 
-    collect_completion(messages, system, config, 45).await
+    let collector = tokio::spawn(async move {
+        let mut buffer = String::new();
+        while let Some(token) = rx.recv().await {
+            buffer.push_str(&token);
+        }
+        buffer
+    });
+
+    let completion = provider.stream_completion(messages, system, tx);
+
+    tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), completion)
+        .await
+        .map_err(|_| "AI request timed out".to_string())?
+        .map_err(|e| e.to_string())?;
+
+    // `tx` was moved into `stream_completion` and dropped on return, so the
+    // collector's channel is now closed and the task will finish.
+    collector.await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
