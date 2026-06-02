@@ -38,6 +38,8 @@ pub fn run() {
             review::record_review_attempt,
             review::get_due_reviews,
             review::get_review_counts,
+            review::get_forgetting_curve_due,
+            review::mark_review_notified,
             schedule::get_today_schedule,
             schedule::schedule_notification,
             sync_cmd::start_sync_server,
