@@ -93,6 +93,20 @@ pub fn init(app: &AppHandle) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_review_items_due
             ON review_items(next_due);
+
+        CREATE TABLE IF NOT EXISTS plan_adjustments (
+            id            TEXT PRIMARY KEY,
+            week_start    TEXT NOT NULL UNIQUE,
+            week_number   INTEGER NOT NULL,
+            generated_at  TEXT NOT NULL,
+            rationale     TEXT NOT NULL,
+            adjustments   TEXT NOT NULL,
+            status        TEXT NOT NULL DEFAULT 'proposed',
+            applied_at    TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_plan_adjustments_week
+            ON plan_adjustments(week_start DESC);
         ",
     )?;
 

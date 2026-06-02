@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { AiMessage, ForgettingCurveSettings, PillarId, ProgressData, ProviderConfig, VoiceConfig } from '@/data/types';
+import { AiMessage, DriftReport, ForgettingCurveSettings, PillarId, PlanAdjustment, ProgressData, ProviderConfig, VoiceConfig } from '@/data/types';
 
 const DEFAULT_FORGETTING_CURVE_SETTINGS: ForgettingCurveSettings = {
   enabled: true,
@@ -42,6 +42,13 @@ interface AppState {
   progress: ProgressData | null;
   streak: number;
 
+  // Drift & rebalancing (ephemeral — loaded from backend, never persisted)
+  pillarDrift: DriftReport | null;
+  planAdjustments: PlanAdjustment[] | null;
+
+  // A prompt queued for the tutor (e.g. a drift catch-up drill). Consumed once.
+  pendingPrompt: string | null;
+
   // Voice
   voiceConfig: VoiceConfig;
 
@@ -65,6 +72,9 @@ interface AppState {
   removeConversation: (id: string) => void;
   setProgress: (p: ProgressData) => void;
   setStreak: (s: number) => void;
+  setPillarDrift: (d: DriftReport | null) => void;
+  setPlanAdjustments: (a: PlanAdjustment[] | null) => void;
+  setPendingPrompt: (p: string | null) => void;
   setProviderConfig: (c: ProviderConfig) => void;
   toggleSidebar: () => void;
   setMobileSidebarOpen: (open: boolean) => void;
@@ -94,6 +104,10 @@ export const useAppStore = create<AppState>()(
 
       progress: null,
       streak: 0,
+
+      pillarDrift: null,
+      planAdjustments: null,
+      pendingPrompt: null,
 
       voiceConfig: {
         enabled: false,
@@ -175,6 +189,9 @@ export const useAppStore = create<AppState>()(
 
       setProgress: (p) => set({ progress: p }),
       setStreak: (s) => set({ streak: s }),
+      setPillarDrift: (d) => set({ pillarDrift: d }),
+      setPlanAdjustments: (a) => set({ planAdjustments: a }),
+      setPendingPrompt: (p) => set({ pendingPrompt: p }),
       setProviderConfig: (c) => set({ providerConfig: c }),
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
       setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),

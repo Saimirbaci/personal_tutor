@@ -27,10 +27,11 @@ Rust Backend (Tauri v2 + rusqlite + Tokio)
     ├── lib.rs               → App entry, plugin registration, command registration
     ├── db/mod.rs            → DbState(Mutex<Connection>), schema init, WAL mode
     ├── commands/            → Tauri command handlers (grouped by domain)
-    │   ├── ai.rs            → stream_chat, get_providers, model listing, save_provider_config
+    │   ├── ai.rs            → stream_chat, get_providers, model listing, save_provider_config, collect_completion (non-streaming AI for background features)
     │   ├── conversations.rs → CRUD + bulk_import_sync
     │   ├── progress.rs      → log_session, get_progress, get_streak, update_milestone
-    │   ├── review.rs        → SM-2 spaced repetition + forgetting-curve nudges (record_review_attempt, get_due_reviews, get_review_counts, get_forgetting_curve_due, mark_review_notified)
+    │   ├── review.rs        → SM-2 spaced repetition (record_review_attempt, get_due_reviews, get_review_counts)
+    │   ├── rebalance.rs     → drift detection + adaptive plan rebalancing (get_pillar_drift, generate/apply/dismiss_plan_adjustment, maybe_generate_due_rebalance, get/set_rebalance_settings)
     │   ├── schedule.rs      → get_today_schedule, schedule_notification
     │   ├── sync_server.rs   → Axum-based local sync server (start/stop/status)
     │   └── voice.rs         → STT model management, transcribe_audio, ElevenLabs TTS
@@ -68,8 +69,8 @@ The `useAI` hook in `src/hooks/useAI.ts` handles event subscriptions and calls t
 
 ## State Management
 Single Zustand store in `src/store/appStore.ts` with `persist` middleware.
-Persisted keys: `providerConfig`, `voiceConfig`, `forgettingCurveSettings`, `sidebarCollapsed`, `activePillar`.
-Ephemeral: all messages, streaming state, conversation list, progress data.
+Persisted keys: `providerConfig`, `voiceConfig`, `sidebarCollapsed`, `activePillar`.
+Ephemeral: all messages, streaming state, conversation list, progress data, `pillarDrift`, `planAdjustments`, `pendingPrompt` (NOT persisted).
 
 ## Database (rusqlite)
 SQLite at `{app_data_dir}/tutor.db`. WAL mode, foreign keys ON.
@@ -77,15 +78,13 @@ SQLite at `{app_data_dir}/tutor.db`. WAL mode, foreign keys ON.
 - **`milestones`** — per-pillar milestone status (pending/in-progress/complete)
 - **`conversations`** — chat conversation metadata (pillar, title)
 - **`chat_messages`** — individual messages (role, content, genui JSON)
-- **`review_items`** — SM-2 spaced repetition state (item_id, item_type, pillar, ease_factor, interval_days, repetitions, next_due, last_seen, content, last_notified_at)
-- **`settings`** — key/value store
+- **`review_items`** — SM-2 spaced repetition state (item_id, item_type, pillar, ease_factor, interval_days, repetitions, next_due)
+- **`plan_adjustments`** — weekly rebalance proposals (week_start UNIQUE, week_number, rationale, adjustments JSON, status proposed/applied/dismissed, applied_at)
+- **`settings`** — key/value store (also holds rebalance settings, e.g. `drift_threshold_days`)
 
 Two DB access patterns coexist:
 - `DbState(Mutex<Connection>)` — shared connection, locked per call (used by most commands)
 - `db::get_connection(&app)` — opens a fresh `rusqlite::Connection` per call (used by `review.rs`); safe under WAL but bypasses the shared mutex
-
-### Schema Migrations
-`db/mod.rs::run_migrations()` runs after `CREATE TABLE IF NOT EXISTS` and applies idempotent column additions that `CREATE TABLE` cannot. Use the `add_column_if_missing(conn, table, column, alter_sql)` helper — it inspects `PRAGMA table_info` rather than swallowing a duplicate-column error. Each migration must tolerate re-running on an already-migrated DB. (Example: `review_items.last_notified_at` for forgetting-curve nudges.)
 
 ## Sync Server
 Axum HTTP server on a local port (start/stop via Tauri commands). Used to sync conversations from mobile/web to desktop. `SyncServerHandle(Mutex<Option<...>>)` managed as Tauri app state.
@@ -105,7 +104,7 @@ Default: `anthropic / claude-sonnet-4-5`.
 
 ## Key Types
 All TypeScript interfaces in `src/data/types.ts`. Match Rust serde structs exactly (camelCase).
-Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`, `ForgettingNudge`, `ForgettingCurveSettings`.
+Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`, `PillarDrift`, `DriftReport`, `PillarStatus`, `AdjustmentStatus`, `PillarAdjustment`, `PlanAdjustment`, `RebalanceSettings`.
 
 ## Spaced Repetition
 SM-2 algorithm in `src-tauri/src/commands/review.rs`. Quality grades 0–5 (≥3 passes). Failed reviews reset interval to 1 day; ease factor floored at 1.3.
@@ -114,13 +113,14 @@ SM-2 algorithm in `src-tauri/src/commands/review.rs`. Quality grades 0–5 (≥3
 - `Flashcard` and `Quiz` GenUI renderers call `recordAttempt` on user interaction
 - `ReviewWidget` on the Dashboard surfaces due-count
 
-## Forgetting Curve Notifications
-Decay-based review nudges layered on top of the SM-2 data. Backend ranking is a pure, testable function; the OS-notification policy (quiet hours, daily cap, dedup) lives on the frontend.
-- **Retention model** (`review.rs`): `R = exp(-t / S)` (Ebbinghaus). Stability `S` grows with the SM-2 interval and per-item ease. Items at/under `NOTIFY_THRESHOLD` (0.80) become nudge candidates. `build_nudges()` is pure — it filters already-notified rows, ranks most-forgotten first, and caps the count.
-- **Commands**: `get_forgetting_curve_due(lookaheadMin?, maxItems?)` returns ranked `ForgettingNudge`s; `mark_review_notified(itemId)` stamps `last_notified_at` to suppress repeats until the item is reviewed again (which updates `last_seen` and re-arms the nudge).
-- **Frontend hook**: `useForgettingCurve` runs an in-app poll (only while the app is open), enforces quiet hours (`isWithinQuietHours`, wraps past midnight), a localStorage per-calendar-day cap, then fires `schedule_notification` + `mark_review_notified` per nudge. `useForgettingNudgePreview` is a read-only fetch for in-app display that does NOT mark items notified.
-- **UI**: `ForgettingCurveCard` on the Dashboard (read-only "About to forget" list); `ForgettingCurveSection` in Settings (toggle, quiet hours, daily cap, poll interval, test reminder).
-- **Settings**: `forgettingCurveSettings` in the Zustand store (persisted) — `enabled`, `quietHoursStart/End`, `dailyCap`, `pollMinutes`, `lookaheadMinutes`.
+## Drift Detection & Adaptive Rebalancing
+"Drift" = Growth Pillars that have planned hours but no recent activity (older than the drift threshold, default 7 days). Logic lives in `src-tauri/src/commands/rebalance.rs` (per-call `db::get_connection` pattern, like `review.rs`). Pure helpers `compute_drift`, `compute_rebalance`, and `load_applied_adjustments` are unit-tested.
+- **Weekly flow**: `generate_plan_rebalance` builds a `PlanAdjustment` (one per `week_start`, persisted in `plan_adjustments`) — shifting minutes toward behind pillars and trimming ahead ones, with an AI-written rationale via `collect_completion`. The user resolves it with `apply_plan_adjustment(weekStart)` or `dismiss_plan_adjustment(weekStart)`.
+- **Schedule reweighting**: `get_today_schedule(app, date)` applies the single *applied* proposal (via `load_applied_adjustments`) to reweight today's blocks (bounded 15–120 min) and may inject a 30-min catch-up block for the most-behind pillar absent from today.
+- **Tutor handoff**: the `DriftCatchUpCard` "Catch up" action sets the one-shot `pendingPrompt` and navigates to the tutor; `TutorChat` consumes `pendingPrompt` once on mount to seed a catch-up drill.
+- **On launch**: `App.tsx` calls `maybe_generate_due_rebalance` once (idempotent — ensures the Sunday proposal exists).
+- Frontend hooks: `useDrift` (`loadDrift`, auto-loads on mount), `usePlanRebalance` (`loadAdjustments`, `generate`, `apply`, `dismiss`, `maybeGenerateDue`)
+- Components: `DriftCatchUpCard` (Dashboard), `PlanRebalanceCard` (ProgressView — on apply calls `usePlan().loadSchedule()` to reconcile), `RebalanceSettingsSection` in Settings (drift threshold days, notifyOnRebalance, autoApplyRebalance — persisted via `set_rebalance_settings`)
 
 ## Tauri IPC Layer
 `src/lib/tauri.ts` provides `tauriInvoke()` and `tauriListen()` wrappers with browser fallback mocks for dev server testing without full Tauri.

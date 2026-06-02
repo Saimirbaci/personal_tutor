@@ -3,12 +3,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Save, Wifi, WifiOff, RefreshCw, Loader2, Search, X, ChevronDown,
   Server, Download, Copy, Check, Play, Square,
-  Mic, Volume2, AlertCircle, Bell,
+  Mic, Volume2, AlertCircle, Bell, Scale,
 } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { tauriInvoke, tauriListen } from '@/lib/tauri';
-import { ProviderConfig, ProviderInfo, SttEngine, SttModel, ElevenLabsVoice, DownloadProgress, ForgettingNudge } from '@/data/types';
+import { ProviderConfig, ProviderInfo, SttEngine, SttModel, ElevenLabsVoice, DownloadProgress, ForgettingNudge, RebalanceSettings } from '@/data/types';
 import { getWeekNumber } from '@/lib/utils';
+import { useDrift } from '@/hooks/useDrift';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type OllamaStatus = 'idle' | 'loading' | 'ok' | 'error';
@@ -344,6 +345,124 @@ function VoiceSettingsSection() {
           )}
         </div>
       )}
+    </motion.section>
+  );
+}
+
+// ── Learning Plan (drift + rebalance) Settings ─────────────────────────────────
+function RebalanceSettingsSection() {
+  const { loadDrift } = useDrift();
+  const [settings, setSettings] = useState<RebalanceSettings>({
+    driftThresholdDays: 7,
+    notifyOnRebalance: true,
+    autoApplyRebalance: false,
+  });
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    tauriInvoke<RebalanceSettings>('get_rebalance_settings')
+      .then((s) => {
+        setSettings(s);
+        setLoaded(true);
+      })
+      .catch(console.error);
+  }, []);
+
+  const persist = useCallback(async (next: RebalanceSettings) => {
+    setSaving(true);
+    try {
+      await tauriInvoke('set_rebalance_settings', { settings: next });
+    } catch (e) {
+      console.error('Failed to save rebalance settings:', e);
+    } finally {
+      setSaving(false);
+    }
+  }, []);
+
+  const update = (patch: Partial<RebalanceSettings>) => {
+    const next = { ...settings, ...patch };
+    setSettings(next);
+    persist(next);
+  };
+
+  const toggles: { key: keyof RebalanceSettings; label: string; desc: string }[] = [
+    {
+      key: 'notifyOnRebalance',
+      label: 'Notify when a weekly rebalance is ready',
+      desc: 'Show a desktop notification each Sunday when a new proposal is generated',
+    },
+    {
+      key: 'autoApplyRebalance',
+      label: 'Auto-apply weekly rebalance',
+      desc: 'Apply proposals automatically instead of reviewing them first (off = propose-then-apply)',
+    },
+  ];
+
+  return (
+    <motion.section
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.105 }}
+      className="rounded-xl bg-[#0f1629] border border-[#1a2540] p-5 space-y-4"
+    >
+      <div className="flex items-center gap-2">
+        <Scale size={15} className="text-[#7C3AED]" />
+        <h2 className="text-sm font-semibold text-[#e2e8f0]">Learning Plan</h2>
+      </div>
+
+      {/* Drift threshold */}
+      <div>
+        <label className="text-[10px] font-semibold text-[#4a5568] uppercase tracking-wide mb-2 block">
+          Drift threshold (days untouched)
+        </label>
+        <input
+          type="number"
+          min={1}
+          max={60}
+          value={settings.driftThresholdDays}
+          disabled={!loaded}
+          onChange={(e) => {
+            const v = parseInt(e.target.value, 10);
+            if (!Number.isNaN(v)) update({ driftThresholdDays: Math.min(Math.max(v, 1), 60) });
+          }}
+          onBlur={() => loadDrift(settings.driftThresholdDays)}
+          className="w-32 px-3 py-2 rounded-lg bg-[#080d1a] border border-[#1a2540] text-sm text-[#e2e8f0] font-mono focus:outline-none focus:border-[#7C3AED] disabled:opacity-50"
+        />
+        <p className="text-[10px] text-[#4a5568] mt-1">
+          A pillar shows a catch-up prompt on the Dashboard after this many days without activity.
+        </p>
+      </div>
+
+      {/* Toggles */}
+      <div className="space-y-2">
+        {toggles.map(({ key, label, desc }) => (
+          <div
+            key={key}
+            className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-[#080d1a] border border-[#1a2540]"
+          >
+            <div>
+              <p className="text-xs text-[#e2e8f0]">{label}</p>
+              <p className="text-[10px] text-[#4a5568]">{desc}</p>
+            </div>
+            <button
+              onClick={() => update({ [key]: !settings[key] } as Partial<RebalanceSettings>)}
+              disabled={!loaded}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0 disabled:opacity-50 ${
+                settings[key] ? 'bg-[#7C3AED]' : 'bg-[#1a2540]'
+              }`}
+            >
+              <span
+                className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${
+                  settings[key] ? 'translate-x-4' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {saving && <p className="text-[10px] text-[#4a5568]">Saving…</p>}
     </motion.section>
   );
 }
@@ -1291,6 +1410,9 @@ export default function Settings() {
           </div>
           <p className="text-xs text-[#4a5568]">{Math.max(12 - week, 0)} weeks remaining</p>
         </motion.section>
+
+        {/* ── Learning Plan (drift + rebalance) ───────────────────────────── */}
+        <RebalanceSettingsSection />
 
         {/* ── Voice ───────────────────────────────────────────────────────── */}
         <VoiceSettingsSection />
