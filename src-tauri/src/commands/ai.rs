@@ -61,6 +61,42 @@ pub async fn stream_chat(
     }
 }
 
+/// Runs a single non-streaming completion and returns the full text.
+///
+/// Internally reuses the streaming provider plumbing — tokens are collected
+/// into a buffer rather than emitted to the UI. Used by background features
+/// (e.g. weekly plan rebalancing) that need an AI rationale without touching
+/// the live chat stream. Bounded by `timeout_secs` so a hung provider can't
+/// block app launch.
+pub async fn collect_completion(
+    messages: Vec<AiMessage>,
+    system: Option<String>,
+    config: ProviderConfig,
+    timeout_secs: u64,
+) -> Result<String, String> {
+    let provider = make_provider(config);
+    let (tx, mut rx) = mpsc::channel::<String>(256);
+
+    let collector = tokio::spawn(async move {
+        let mut buffer = String::new();
+        while let Some(token) = rx.recv().await {
+            buffer.push_str(&token);
+        }
+        buffer
+    });
+
+    let completion = provider.stream_completion(messages, system, tx);
+
+    tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), completion)
+        .await
+        .map_err(|_| "AI request timed out".to_string())?
+        .map_err(|e| e.to_string())?;
+
+    // `tx` was moved into `stream_completion` and dropped on return, so the
+    // collector's channel is now closed and the task will finish.
+    collector.await.map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn get_providers() -> Vec<ProviderInfo> {
     vec![

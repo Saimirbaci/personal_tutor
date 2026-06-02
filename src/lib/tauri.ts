@@ -81,6 +81,22 @@ function getMockData<T>(cmd: string, _args?: Record<string, unknown>): Promise<T
     update_milestone: null,
     save_provider_config: null,
     schedule_notification: null,
+    get_pillar_drift: {
+      thresholdDays: 7,
+      generatedAt: new Date().toISOString(),
+      drifted: [],
+    },
+    get_plan_adjustments: [],
+    maybe_generate_due_rebalance: null,
+    generate_plan_rebalance: null,
+    apply_plan_adjustment: null,
+    dismiss_plan_adjustment: null,
+    get_rebalance_settings: {
+      driftThresholdDays: 7,
+      notifyOnRebalance: true,
+      autoApplyRebalance: false,
+    },
+    set_rebalance_settings: null,
   };
 
   return Promise.resolve((mocks[cmd] ?? null) as T);

@@ -215,3 +215,53 @@ export interface ReviewCounts {
   due: number;
   dueToday: number;
 }
+
+// ── Drift Detection & Adaptive Rebalancing ─────────────────────────────────────
+
+/** A pillar that has planned hours but hasn't been touched recently. */
+export interface PillarDrift {
+  pillar: PillarId;
+  /** Days since last activity; null when never touched. */
+  daysSinceActivity: number | null;
+  lastActivity: string | null;
+  plannedHours: number;
+  actualHours: number;
+  /** Normalized severity used for ranking (higher = more neglected). */
+  severity: number;
+  suggestion: string;
+}
+
+export interface DriftReport {
+  thresholdDays: number;
+  generatedAt: string;
+  drifted: PillarDrift[];
+}
+
+export type PillarStatus = 'ahead' | 'behind' | 'on_track';
+export type AdjustmentStatus = 'proposed' | 'applied' | 'dismissed';
+
+export interface PillarAdjustment {
+  pillar: PillarId;
+  plannedHours: number;
+  actualHours: number;
+  status: PillarStatus;
+  /** Positive = behind (needs more time), negative = ahead (can trim). */
+  weightDelta: number;
+  recommendedMinutesDelta: number;
+}
+
+export interface PlanAdjustment {
+  weekStart: string;
+  weekNumber: number;
+  generatedAt: string;
+  rationale: string;
+  adjustments: PillarAdjustment[];
+  status: AdjustmentStatus;
+  appliedAt: string | null;
+}
+
+export interface RebalanceSettings {
+  driftThresholdDays: number;
+  notifyOnRebalance: boolean;
+  autoApplyRebalance: boolean;
+}

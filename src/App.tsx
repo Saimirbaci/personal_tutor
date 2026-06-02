@@ -1,4 +1,4 @@
-import { Component, useEffect, type ReactNode } from 'react';
+import { Component, useEffect, useRef, type ReactNode } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -40,6 +40,7 @@ import ProgressView from '@/components/progress/ProgressView';
 import Settings from '@/components/settings/Settings';
 import { useAppStore } from '@/store/appStore';
 import { useProgress } from '@/hooks/useProgress';
+import { usePlanRebalance } from '@/hooks/usePlanRebalance';
 
 const pageVariants = {
   initial: { opacity: 0, y: 8 },
@@ -49,6 +50,7 @@ const pageVariants = {
 
 export default function App() {
   const { loadProgress } = useProgress();
+  const { maybeGenerateDue, loadAdjustments } = usePlanRebalance();
   const { currentView, activePillar } = useAppStore();
   const navigate = useNavigate();
   const location = useLocation();
@@ -56,6 +58,18 @@ export default function App() {
   useEffect(() => {
     loadProgress();
   }, [loadProgress]);
+
+  // On launch, ensure the Sunday rebalance proposal exists (idempotent,
+  // Sunday-gated on the backend), then load proposals into the store.
+  const rebalanceCheckedRef = useRef(false);
+  useEffect(() => {
+    if (rebalanceCheckedRef.current) return;
+    rebalanceCheckedRef.current = true;
+    (async () => {
+      await maybeGenerateDue();
+      await loadAdjustments();
+    })();
+  }, [maybeGenerateDue, loadAdjustments]);
 
   // Sync store navigation with router
   useEffect(() => {

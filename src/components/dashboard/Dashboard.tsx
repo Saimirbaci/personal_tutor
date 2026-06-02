@@ -9,6 +9,7 @@ import TodayCard from './TodayCard';
 import PillarProgress from './PillarProgress';
 import StreakWidget from './StreakWidget';
 import ReviewWidget from './ReviewWidget';
+import DriftCatchUpCard from './DriftCatchUpCard';
 
 export default function Dashboard() {
   const { currentBlock, todaySchedule } = usePlan();
@@ -54,6 +55,15 @@ export default function Dashboard() {
               Jump In — {currentBlock.emoji} {currentBlock.pillar.charAt(0).toUpperCase() + currentBlock.pillar.slice(1)}
             </button>
           )}
+        </motion.div>
+
+        {/* Drift catch-up surface (hidden when nothing is drifting) */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.04 }}
+        >
+          <DriftCatchUpCard />
         </motion.div>
 
         {/* Today's schedule */}

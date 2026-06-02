@@ -2,6 +2,14 @@ use chrono::{Datelike, Local, NaiveDate, Weekday};
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
+use crate::commands::rebalance::{load_applied_adjustments, PillarAdjustment};
+
+/// Bounds for a reweighted schedule block, in minutes.
+const MIN_BLOCK_MINUTES: i64 = 15;
+const MAX_BLOCK_MINUTES: i64 = 120;
+/// Duration of an injected catch-up block for a behind pillar with no block today.
+const CATCH_UP_BLOCK_MINUTES: u32 = 30;
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ScheduleBlock {
     pub pillar: String,
@@ -190,8 +198,71 @@ fn build_weekend_schedule(week: u32, is_saturday: bool) -> Vec<ScheduleBlock> {
     }
 }
 
+/// Applies an active rebalance proposal to today's blocks: nudges each block's
+/// duration toward behind pillars / away from ahead pillars (bounded), and
+/// injects a short catch-up block for a behind pillar that has no block today.
+/// With no adjustments, blocks are returned unchanged (backward compatible).
+fn apply_adjustments(
+    mut blocks: Vec<ScheduleBlock>,
+    adjustments: &[PillarAdjustment],
+    week: u32,
+) -> Vec<ScheduleBlock> {
+    if adjustments.is_empty() {
+        return blocks;
+    }
+
+    for block in blocks.iter_mut() {
+        if let Some(adj) = adjustments.iter().find(|a| a.pillar == block.pillar) {
+            if adj.recommended_minutes_delta != 0 {
+                let nudged = (block.duration_min as i64 + adj.recommended_minutes_delta as i64)
+                    .clamp(MIN_BLOCK_MINUTES, MAX_BLOCK_MINUTES);
+                block.duration_min = nudged as u32;
+            }
+        }
+    }
+
+    // Inject a catch-up block for the most-behind pillar absent from today.
+    let mut behind: Vec<&PillarAdjustment> = adjustments
+        .iter()
+        .filter(|a| a.status == "behind" && a.recommended_minutes_delta > 0)
+        .collect();
+    behind.sort_by(|a, b| {
+        b.weight_delta
+            .partial_cmp(&a.weight_delta)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    if let Some(target) = behind
+        .into_iter()
+        .find(|a| !blocks.iter().any(|b| b.pillar == a.pillar))
+    {
+        blocks.push(ScheduleBlock {
+            pillar: target.pillar.clone(),
+            duration_min: CATCH_UP_BLOCK_MINUTES,
+            topic: format!("Catch-up: {}", get_pillar_topic(&target.pillar, week)),
+            time_label: "20:00 – 20:30".to_string(),
+            emoji: "⏰".to_string(),
+            color: pillar_color(&target.pillar),
+        });
+    }
+
+    blocks
+}
+
+fn pillar_color(pillar: &str) -> String {
+    match pillar {
+        "llm" => "#2E5FA3",
+        "hardware" => "#0E7C86",
+        "sales" => "#C9762A",
+        "communication" => "#7B3F8E",
+        "voice" => "#B54A00",
+        _ => "#4a5568",
+    }
+    .to_string()
+}
+
 #[tauri::command]
-pub fn get_today_schedule(date: String) -> Result<TodaySchedule, String> {
+pub fn get_today_schedule(app: AppHandle, date: String) -> Result<TodaySchedule, String> {
     let today = NaiveDate::parse_from_str(&date, "%Y-%m-%d")
         .unwrap_or_else(|_| Local::now().date_naive());
 
@@ -209,11 +280,14 @@ pub fn get_today_schedule(date: String) -> Result<TodaySchedule, String> {
     }
     .to_string();
 
-    let blocks = match weekday {
+    let base_blocks = match weekday {
         Weekday::Sat => build_weekend_schedule(week, true),
         Weekday::Sun => build_weekend_schedule(week, false),
         _ => build_weekday_schedule(week),
     };
+
+    // Reweight using the single applied rebalance proposal, if any.
+    let blocks = apply_adjustments(base_blocks, &load_applied_adjustments(&app), week);
 
     let current_focus = blocks
         .first()

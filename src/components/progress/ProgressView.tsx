@@ -3,6 +3,7 @@ import { useAppStore } from '@/store/appStore';
 import { PILLARS } from '@/data/plan';
 import { formatHours, formatDateShort } from '@/lib/utils';
 import { PillarId } from '@/data/types';
+import PlanRebalanceCard from './PlanRebalanceCard';
 
 export default function ProgressView() {
   const { progress, streak } = useAppStore();
@@ -36,6 +37,15 @@ export default function ProgressView() {
               Keep logging daily sessions to maintain momentum
             </p>
           </div>
+        </motion.div>
+
+        {/* Weekly plan rebalance proposal */}
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.08 }}
+        >
+          <PlanRebalanceCard />
         </motion.div>
 
         {/* Pillar breakdown */}
