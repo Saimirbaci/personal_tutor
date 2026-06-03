@@ -42,7 +42,14 @@ useEffect(() => {
 - AI interactions: `useAI` — builds system prompt, calls `stream_chat`, manages Tauri event subscriptions
 - Voice: `useVoice` — calls `transcribe_audio`, `tts_elevenlabs`, model status/download
 - Progress: `useProgress` — calls `log_session`, `get_progress`, `get_streak`
+- Learning analytics: `useMastery`, `useActivationQuiz`, `useKnowledgeGaps`, `useDepthScore`
 - Never call `tauriInvoke` directly inside React components
+
+### Background classification (fire-and-forget)
+- Pattern: `useDepthScore.ts` exports a module-level async `runDepthScore(id, {force?})` (a plain function, not a React hook) alongside the read hook `useConversationDepth`. Use this when work is triggered by an event (navigate-away, unmount) rather than render.
+- Make it idempotent and safe: a module-scoped `inFlight` `Set` dedupes concurrent calls, skip while `isStreaming`, short-circuit if already computed, and **swallow errors** (a missing API key must never crash the caller — `console.error`, don't throw).
+- One-shot LLM calls (no streaming UI) go through the `collect_completion` Tauri command, not `stream_chat`.
+- GenUI/classifier text helpers live in `src/lib/genui.ts` (`stripGenUITags`, `parseDepthScore`, `DEPTH_SCORE_PROMPT`) — keep `parseDepthScore`'s clamp/fallback behavior in sync with Rust `depth.rs::parse_depth_payload`.
 
 ## Types
 - All shared TypeScript interfaces in `src/data/types.ts` — single source of truth
