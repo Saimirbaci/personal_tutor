@@ -482,7 +482,7 @@ pub async fn generate_weekly_digest(
         content: user,
     }];
     let content =
-        crate::commands::ai::collect_completion(messages, Some(DIGEST_SYSTEM_PROMPT.to_string()), cfg, 90)
+        crate::commands::ai::collect_completion(messages, Some(DIGEST_SYSTEM_PROMPT.to_string()), cfg, Some(90))
             .await?;
 
     // 3. Persist (upsert on week_start), tracking whether this is a new week.

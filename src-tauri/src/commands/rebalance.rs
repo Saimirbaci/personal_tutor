@@ -571,7 +571,7 @@ pub async fn generate_plan_rebalance(
                 messages,
                 Some(REBALANCE_SYSTEM_PROMPT.to_string()),
                 provider_config,
-                90,
+                Some(90),
             )
             .await
             {
