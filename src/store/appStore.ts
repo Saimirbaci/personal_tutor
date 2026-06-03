@@ -10,6 +10,7 @@ import {
   PlanAdjustment,
   ProgressData,
   ProviderConfig,
+  ReviewItem,
   VoiceConfig,
   WeeklyDigest,
 } from '@/data/types';
@@ -68,6 +69,13 @@ interface AppState {
   // (e.g. a spaced-review drill) rather than the resumed last one.
   pendingPromptFresh: boolean;
 
+  // Spaced-review session (ephemeral, never persisted). When the user starts a
+  // batch review, the due items are queued here and drilled ONE AT A TIME in the
+  // tutor — the next item is only sent after the user advances. `reviewCursor`
+  // is the index of the item currently being reviewed. Empty queue = no session.
+  reviewQueue: ReviewItem[];
+  reviewCursor: number;
+
   // Progress
   progress: ProgressData | null;
   streak: number;
@@ -112,6 +120,9 @@ interface AppState {
   upsertConversation: (summary: ConversationListEntry) => void;
   removeConversation: (id: string) => void;
   setPendingPrompt: (prompt: string | null, fresh?: boolean) => void;
+  beginReviewSession: (items: ReviewItem[]) => void;
+  advanceReviewSession: () => ReviewItem | null;
+  endReviewSession: () => void;
   setProgress: (p: ProgressData) => void;
   setStreak: (s: number) => void;
   setWeeklyDigests: (d: WeeklyDigest[]) => void;
@@ -152,6 +163,9 @@ export const useAppStore = create<AppState>()(
       conversationList: [],
       pendingPrompt: null,
       pendingPromptFresh: false,
+
+      reviewQueue: [],
+      reviewCursor: 0,
 
       progress: null,
       streak: 0,
@@ -256,6 +270,22 @@ export const useAppStore = create<AppState>()(
         })),
       setPendingPrompt: (prompt, fresh = false) =>
         set({ pendingPrompt: prompt, pendingPromptFresh: prompt ? fresh : false }),
+
+      beginReviewSession: (items) => set({ reviewQueue: items, reviewCursor: 0 }),
+      // Advance to the next queued item and return it (null when the queue is
+      // exhausted, leaving the session ended). The caller sends the returned
+      // item's prompt into the tutor.
+      advanceReviewSession: () => {
+        const { reviewQueue, reviewCursor } = get();
+        const next = reviewCursor + 1;
+        if (next >= reviewQueue.length) {
+          set({ reviewQueue: [], reviewCursor: 0 });
+          return null;
+        }
+        set({ reviewCursor: next });
+        return reviewQueue[next];
+      },
+      endReviewSession: () => set({ reviewQueue: [], reviewCursor: 0 }),
 
       setProgress: (p) => set({ progress: p }),
       setStreak: (s) => set({ streak: s }),

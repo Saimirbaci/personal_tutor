@@ -4,34 +4,15 @@ import { useAppStore } from '@/store/appStore';
 import { useReviewCounts, useDueReviews } from '@/hooks/useReview';
 import { PILLARS } from '@/data/plan';
 import { ReviewItem } from '@/data/types';
-
-/** Prompt for drilling a single due review item in the tutor.
- *  Asks for a GenUI block (self-contained, click-to-reveal) rather than a
- *  conversational quiz, so the rendered card works as intended. */
-function singleReviewPrompt(item: ReviewItem): string {
-  const kind = item.itemType === 'quiz' ? 'a quiz' : 'a flashcard';
-  return (
-    `I'm due to review this ${item.itemType}: "${item.content}". ` +
-    `Render ${kind} GenUI block to test my recall of it, then add a one-line note on ` +
-    `the core idea I should remember.`
-  );
-}
-
-/** Prompt for running a short batch review session. */
-function batchReviewPrompt(count: number): string {
-  return (
-    `I have ${count} spaced-repetition item${count === 1 ? '' : 's'} due for review. ` +
-    `Run a focused review session over what I've been learning: emit a few quiz and ` +
-    `flashcard GenUI blocks (each self-contained with its answer), spaced with brief ` +
-    `explanations of the trickiest points.`
-  );
-}
+import { singleReviewPrompt } from '@/lib/reviewPrompts';
 
 export default function ReviewWidget() {
   const { counts } = useReviewCounts();
   const { items } = useDueReviews();
   const setView = useAppStore((s) => s.setView);
   const setPendingPrompt = useAppStore((s) => s.setPendingPrompt);
+  const beginReviewSession = useAppStore((s) => s.beginReviewSession);
+  const endReviewSession = useAppStore((s) => s.endReviewSession);
   const navigate = useNavigate();
 
   if (!counts || counts.total === 0) {
@@ -41,13 +22,24 @@ export default function ReviewWidget() {
   const due = counts.due;
   const preview = items.slice(0, 3);
 
-  const startReview = (prompt: string, pillar?: ReviewItem['pillar']) => {
-    setPendingPrompt(prompt, true); // open in a fresh conversation
-    setView('tutor', pillar ?? undefined);
+  // Open the tutor on the first item of `queue`, then drill the rest one at a
+  // time as the user advances. A single-item review is just a queue of one.
+  const startReview = (queue: ReviewItem[]) => {
+    if (queue.length === 0) return;
+    beginReviewSession(queue);
+    setPendingPrompt(singleReviewPrompt(queue[0]), true); // fresh conversation
+    setView('tutor', queue[0].pillar ?? undefined);
     navigate('/tutor');
   };
 
-  const handleReview = () => startReview(batchReviewPrompt(due));
+  const reviewSingle = (item: ReviewItem) => {
+    endReviewSession(); // a single-item review has no follow-on queue
+    setPendingPrompt(singleReviewPrompt(item), true);
+    setView('tutor', item.pillar ?? undefined);
+    navigate('/tutor');
+  };
+
+  const handleReview = () => startReview(items);
 
   return (
     <div className="rounded-xl bg-[#0f1629] border border-[#1a2540] p-5">
@@ -87,7 +79,7 @@ export default function ReviewWidget() {
                 <li key={item.itemId}>
                   <button
                     type="button"
-                    onClick={() => startReview(singleReviewPrompt(item), item.pillar)}
+                    onClick={() => reviewSingle(item)}
                     className="w-full flex items-center gap-2 text-xs text-left text-[#e2e8f0] rounded-md px-1.5 py-1 -mx-1.5 transition-colors hover:bg-[#1a2540]"
                   >
                     <span

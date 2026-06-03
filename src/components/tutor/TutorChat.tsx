@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { PanelLeft, Plus, Trash2, Pencil, Check, X, MessageSquare, FileText } from 'lucide-react';
+import { PanelLeft, Plus, Trash2, Pencil, Check, X, MessageSquare, FileText, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { tauriInvoke } from '@/lib/tauri';
 import { useAppStore } from '@/store/appStore';
 import { useAI } from '@/hooks/useAI';
@@ -11,6 +11,7 @@ import SummaryCard from '@/components/SummaryCard';
 import { useMobile } from '@/hooks/useMobile';
 import { PILLARS, PLAN } from '@/data/plan';
 import { PillarId, CurriculumItem } from '@/data/types';
+import { singleReviewPrompt } from '@/lib/reviewPrompts';
 import { ConversationListEntry } from '@/store/appStore';
 import MessageBubble from './MessageBubble';
 import InputBar from './InputBar';
@@ -160,6 +161,10 @@ export default function TutorChat() {
     pendingPrompt,
     pendingPromptFresh,
     setPendingPrompt,
+    reviewQueue,
+    reviewCursor,
+    advanceReviewSession,
+    endReviewSession,
   } = useAppStore((s) => ({
     messages: s.messages,
     isStreaming: s.isStreaming,
@@ -171,6 +176,10 @@ export default function TutorChat() {
     pendingPrompt: s.pendingPrompt,
     pendingPromptFresh: s.pendingPromptFresh,
     setPendingPrompt: s.setPendingPrompt,
+    reviewQueue: s.reviewQueue,
+    reviewCursor: s.reviewCursor,
+    advanceReviewSession: s.advanceReviewSession,
+    endReviewSession: s.endReviewSession,
   }));
 
   const { sendMessage, clearMessages } = useAI();
@@ -318,21 +327,23 @@ export default function TutorChat() {
   // ── New conversation ──────────────────────────────────────────────────────
   const handleNewConversation = useCallback(async () => {
     summariseSession(activeConversationId); // session ending — summarise the old one
+    endReviewSession(); // abandon any in-progress spaced-review drill
     clearMessages();
     await createConversation(selectedPillar);
-  }, [clearMessages, createConversation, selectedPillar, summariseSession, activeConversationId]);
+  }, [clearMessages, createConversation, selectedPillar, summariseSession, activeConversationId, endReviewSession]);
 
   // ── Switch to a conversation ──────────────────────────────────────────────
   const handleSelectConversation = useCallback(
     async (id: string) => {
       if (id === activeConversationId) return;
       summariseSession(activeConversationId); // leaving the current session
+      endReviewSession(); // leaving the review thread abandons the drill
       clearMessages();
       setActiveConversation(id);
       const msgs = await loadConversationMessages(id);
       useAppStore.setState({ messages: msgs });
     },
-    [activeConversationId, clearMessages, setActiveConversation, loadConversationMessages, summariseSession]
+    [activeConversationId, clearMessages, setActiveConversation, loadConversationMessages, summariseSession, endReviewSession]
   );
 
   // ── Delete ────────────────────────────────────────────────────────────────
@@ -357,6 +368,24 @@ export default function TutorChat() {
   const handleSend = (content: string) => {
     sendMessage(content, selectedPillar ?? undefined);
   };
+
+  // ── Spaced review: advance to the next queued item ────────────────────────
+  // A batch review drills items one at a time. The next item's prompt is sent
+  // into the SAME conversation only after the user clicks "Next question", so
+  // each LLM response stays small and streams smoothly.
+  const inReviewSession = reviewQueue.length > 0;
+  const reviewRemaining = inReviewSession ? reviewQueue.length - reviewCursor - 1 : 0;
+  // Only surface the prompt once the current item's answer has rendered.
+  const lastMessageIsAssistant =
+    messages.length > 0 && messages[messages.length - 1].role === 'assistant';
+  const showReviewControls = inReviewSession && !isStreaming && lastMessageIsAssistant;
+
+  const handleNextReviewItem = useCallback(() => {
+    const next = advanceReviewSession();
+    if (next) {
+      sendMessage(singleReviewPrompt(next), next.pillar ?? undefined);
+    }
+  }, [advanceReviewSession, sendMessage]);
 
   // ── Render ────────────────────────────────────────────────────────────────
   const groups = groupByDate(conversationList);
@@ -659,6 +688,42 @@ export default function TutorChat() {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* Spaced-review session controls — drill the queue one item at a time */}
+          {showReviewControls && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex flex-col items-center gap-2 pt-2"
+            >
+              <span className="text-[10px] font-semibold text-[#4a5568] uppercase tracking-wider">
+                Review · {reviewCursor + 1} of {reviewQueue.length}
+              </span>
+              {reviewRemaining > 0 ? (
+                <button
+                  onClick={handleNextReviewItem}
+                  className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all hover:bg-[#1a2540]"
+                  style={{ color: '#C9A84C', border: '1px solid #C9A84C40' }}
+                >
+                  Next question
+                  <ArrowRight size={13} />
+                </button>
+              ) : (
+                <div className="flex flex-col items-center gap-2">
+                  <span className="flex items-center gap-1.5 text-xs text-[#C9A84C]">
+                    <CheckCircle2 size={14} />
+                    Review complete — nicely done.
+                  </span>
+                  <button
+                    onClick={endReviewSession}
+                    className="text-[11px] text-[#4a5568] hover:text-[#e2e8f0] px-3 py-1 rounded-lg hover:bg-[#1a2540] transition-all"
+                  >
+                    Finish
+                  </button>
+                </div>
+              )}
+            </motion.div>
           )}
 
           <div ref={messagesEndRef} />
