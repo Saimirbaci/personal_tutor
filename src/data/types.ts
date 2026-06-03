@@ -275,6 +275,33 @@ export interface ActivationResult {
   quality: number;
 }
 
+// ── Session Depth Scoring ───────────────────────────────────────────────────
+
+/** A 1–5 engagement-depth rating, 1 = surface Q&A, 5 = applied/Socratic. */
+export type DepthScore = 1 | 2 | 3 | 4 | 5;
+
+/** Raw classifier output parsed from the depth-score GenUI block. */
+export interface DepthScoreData {
+  score: DepthScore;
+  rationale: string;
+  /** Qualitative signals the classifier observed, e.g. "applied-scenarios". */
+  dimensions: string[];
+}
+
+/** A persisted depth assessment. Mirrors the Rust `ConversationDepthRow` (camelCase). */
+export interface ConversationDepth {
+  conversationId: string;
+  score: number;
+  rationale: string;
+  dimensions: string[];
+  model?: string | null;
+  messageCount: number;
+  createdAt: string;
+  updatedAt: string;
+  conversationTitle?: string | null;
+  conversationPillar?: PillarId | null;
+}
+
 // ── Knowledge Gaps ────────────────────────────────────────────────────────────
 
 export type GapSignalKind = 'weak_quiz' | 'low_ease' | 'shallow_chat' | 'stale';

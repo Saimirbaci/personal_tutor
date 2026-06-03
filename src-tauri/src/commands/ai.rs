@@ -61,6 +61,39 @@ pub async fn stream_chat(
     }
 }
 
+/// Run a single non-streaming completion and return the full text.
+///
+/// Unlike `stream_chat`, this collects every token into a `String` and returns it
+/// directly rather than emitting `ai-token`/`ai-done` events. Used by background
+/// classification flows (e.g. session depth scoring) that need a one-shot result
+/// without touching the live chat UI. Provider/API-key resolution stays on the
+/// frontend via `config`, mirroring `stream_chat`.
+#[tauri::command]
+pub async fn collect_completion(
+    messages: Vec<AiMessage>,
+    system: Option<String>,
+    config: ProviderConfig,
+) -> Result<String, String> {
+    let provider = make_provider(config);
+
+    let (tx, mut rx) = mpsc::channel::<String>(256);
+
+    let collector = tokio::spawn(async move {
+        let mut buf = String::new();
+        while let Some(token) = rx.recv().await {
+            buf.push_str(&token);
+        }
+        buf
+    });
+
+    provider
+        .stream_completion(messages, system, tx)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    collector.await.map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn get_providers() -> Vec<ProviderInfo> {
     vec![

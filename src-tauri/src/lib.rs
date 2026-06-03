@@ -2,7 +2,7 @@ pub mod ai;
 pub mod commands;
 pub mod db;
 
-use commands::{activation, ai as ai_cmd, conversations as conv_cmd, gaps, mastery, progress, review, schedule, sync_server as sync_cmd, voice as voice_cmd};
+use commands::{activation, ai as ai_cmd, conversations as conv_cmd, depth, gaps, mastery, progress, review, schedule, sync_server as sync_cmd, voice as voice_cmd};
 use sync_cmd::SyncServerHandle;
 use tauri::Manager;
 use tokio::sync::Mutex;
@@ -20,6 +20,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             ai_cmd::stream_chat,
+            ai_cmd::collect_completion,
             ai_cmd::get_providers,
             ai_cmd::get_ollama_models,
             ai_cmd::get_openrouter_models,
@@ -46,6 +47,10 @@ pub fn run() {
             gaps::detect_knowledge_gaps,
             gaps::dismiss_gap,
             gaps::mark_gap_drilled,
+            // Session depth scoring commands
+            depth::save_conversation_depth,
+            depth::get_conversation_depth,
+            depth::list_conversation_depths,
             schedule::get_today_schedule,
             schedule::schedule_notification,
             sync_cmd::start_sync_server,
