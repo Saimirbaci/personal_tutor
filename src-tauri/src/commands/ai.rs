@@ -67,9 +67,8 @@ pub async fn stream_chat(
 /// into a buffer rather than emitted to the UI. Used by background features
 /// (e.g. weekly plan rebalancing) that need an AI rationale without touching
 /// the live chat stream. Bounded by `timeout_secs` so a hung provider can't
-/// block app launch.
-/// `timeout_secs` is optional for backwards compatibility with callers that
-/// don't pass it (e.g. depth scoring); defaults to 45 seconds.
+/// block app launch. `timeout_secs` is optional and defaults to 45 seconds
+/// when omitted by the caller.
 #[tauri::command]
 pub async fn collect_completion(
     messages: Vec<AiMessage>,
