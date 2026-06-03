@@ -2,7 +2,7 @@ pub mod ai;
 pub mod commands;
 pub mod db;
 
-use commands::{ai as ai_cmd, conversations as conv_cmd, progress, rebalance, review, schedule, sync_server as sync_cmd, voice as voice_cmd};
+use commands::{activation, ai as ai_cmd, conversations as conv_cmd, digest as digest_cmd, gaps, mastery, progress, rebalance, review, schedule, summaries as summary_cmd, sync_server as sync_cmd, voice as voice_cmd};
 use sync_cmd::SyncServerHandle;
 use tauri::Manager;
 use tokio::sync::Mutex;
@@ -40,8 +40,26 @@ pub fn run() {
             review::get_review_counts,
             review::get_forgetting_curve_due,
             review::mark_review_notified,
+            summary_cmd::save_conversation_summary,
+            summary_cmd::get_conversation_summary,
+            summary_cmd::list_recent_summaries,
+            summary_cmd::seed_review_items_from_summary,
+            ai_cmd::summarize_conversation,
+            mastery::recompute_mastery,
+            mastery::get_mastery_scores,
+            activation::get_activation_quiz,
+            // Knowledge gap commands
+            gaps::get_knowledge_gaps,
+            gaps::detect_knowledge_gaps,
+            gaps::dismiss_gap,
+            gaps::mark_gap_drilled,
             schedule::get_today_schedule,
             schedule::schedule_notification,
+            schedule::get_morning_briefing,
+            digest_cmd::generate_weekly_digest,
+            digest_cmd::get_weekly_digests,
+            digest_cmd::maybe_generate_due_digest,
+            digest_cmd::export_weekly_digest,
             rebalance::get_pillar_drift,
             rebalance::generate_plan_rebalance,
             rebalance::get_plan_adjustments,

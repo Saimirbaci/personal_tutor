@@ -2,7 +2,9 @@ use chrono::{Datelike, Local, NaiveDate, Weekday};
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
+use crate::commands::progress::get_streak;
 use crate::commands::rebalance::{load_applied_adjustments, PillarAdjustment};
+use crate::commands::review::{get_review_counts, ReviewCounts};
 
 /// Bounds for a reweighted schedule block, in minutes.
 const MIN_BLOCK_MINUTES: i64 = 15;
@@ -309,6 +311,77 @@ fn capitalize(s: &str) -> String {
         None => String::new(),
         Some(f) => f.to_uppercase().to_string() + c.as_str(),
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MorningBriefing {
+    pub date: String,
+    pub day_name: String,
+    pub week_number: u32,
+    pub first_block: Option<ScheduleBlock>,
+    pub total_blocks: u32,
+    pub current_focus: String,
+    pub streak: i32,
+    pub review_counts: ReviewCounts,
+    pub headline: String,
+    pub notification_body: String,
+}
+
+/// Aggregates today's schedule, due reviews, and current streak into a single
+/// briefing payload for the Dashboard's morning "Jump In" card and push notification.
+#[tauri::command]
+pub fn get_morning_briefing(app: AppHandle, date: String) -> Result<MorningBriefing, String> {
+    let schedule = get_today_schedule(app.clone(), date)?;
+    let streak = get_streak(app.clone()).unwrap_or(0);
+    let review_counts = get_review_counts(app).unwrap_or(ReviewCounts {
+        total: 0,
+        due: 0,
+        due_today: 0,
+    });
+
+    let first_block = schedule.blocks.first().cloned();
+    let total_blocks = schedule.blocks.len() as u32;
+
+    let headline = match &first_block {
+        Some(b) => format!(
+            "{} {} — {} ({} min)",
+            b.emoji,
+            capitalize(&b.pillar),
+            b.topic,
+            b.duration_min
+        ),
+        None => "Rest day — no scheduled blocks".to_string(),
+    };
+
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(b) = &first_block {
+        parts.push(format!("First up: {} at {}", capitalize(&b.pillar), b.time_label));
+    }
+    if review_counts.due > 0 {
+        parts.push(format!("{} review{} due", review_counts.due, if review_counts.due == 1 { "" } else { "s" }));
+    }
+    if streak > 0 {
+        parts.push(format!("🔥 {}-day streak", streak));
+    }
+    let notification_body = if parts.is_empty() {
+        "Open the app to start today's session.".to_string()
+    } else {
+        parts.join(" · ")
+    };
+
+    Ok(MorningBriefing {
+        date: schedule.date,
+        day_name: schedule.day_name,
+        week_number: schedule.week_number,
+        first_block,
+        total_blocks,
+        current_focus: schedule.current_focus,
+        streak,
+        review_counts,
+        notification_body,
+        headline,
+    })
 }
 
 #[tauri::command]

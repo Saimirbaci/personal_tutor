@@ -1,6 +1,18 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { AiMessage, DriftReport, ForgettingCurveSettings, PillarId, PlanAdjustment, ProgressData, ProviderConfig, VoiceConfig } from '@/data/types';
+import {
+  AiMessage,
+  DriftReport,
+  ForgettingCurveSettings,
+  KnowledgeGap,
+  MasteryScore,
+  PillarId,
+  PlanAdjustment,
+  ProgressData,
+  ProviderConfig,
+  VoiceConfig,
+  WeeklyDigest,
+} from '@/data/types';
 
 const DEFAULT_FORGETTING_CURVE_SETTINGS: ForgettingCurveSettings = {
   enabled: true,
@@ -11,7 +23,9 @@ const DEFAULT_FORGETTING_CURVE_SETTINGS: ForgettingCurveSettings = {
   lookaheadMinutes: 0,
 };
 
-export interface ConversationSummary {
+/** A lightweight conversation row used in the sidebar/history list.
+ *  (Distinct from the AI-generated `ConversationSummary` note in data/types.ts.) */
+export interface ConversationListEntry {
   id: string;
   title: string;
   pillar: string | null;
@@ -20,12 +34,21 @@ export interface ConversationSummary {
   message_count: number;
 }
 
-type ViewType = 'dashboard' | 'tutor' | 'pillar' | 'progress' | 'settings';
+type ViewType = 'dashboard' | 'tutor' | 'pillar' | 'progress' | 'settings' | 'activation';
+
+/** Activation quiz length is clamped to this range (mirrors the backend). */
+export const MIN_ACTIVATION_LENGTH = 3;
+export const MAX_ACTIVATION_LENGTH = 5;
 
 interface AppState {
   // Navigation
   currentView: ViewType;
   activePillar: PillarId | null;
+
+  // Pre-session activation quiz
+  pendingSessionPillar: PillarId | null;
+  activationQuizEnabled: boolean;
+  activationQuizLength: number;
 
   // AI
   messages: AiMessage[];
@@ -36,18 +59,29 @@ interface AppState {
 
   // Conversations
   activeConversationId: string | null;
-  conversationList: ConversationSummary[];
+  conversationList: ConversationListEntry[];
+
+  // A prompt queued by another view (e.g. a summary's "Reply" or a drift
+  // catch-up drill) to be sent once the tutor opens. Consumed once.
+  pendingPrompt: string | null;
 
   // Progress
   progress: ProgressData | null;
   streak: number;
 
+  // Weekly digests (ephemeral — loaded from backend, never persisted)
+  weeklyDigests: WeeklyDigest[];
+  selectedDigestWeek: string | null;
+
+  // Mastery (ephemeral — recomputable, never persisted)
+  masteryByItem: Record<string, number>;
+
+  // Knowledge gaps (ephemeral — recomputed from live signals, never persisted)
+  knowledgeGaps: KnowledgeGap[] | null;
+
   // Drift & rebalancing (ephemeral — loaded from backend, never persisted)
   pillarDrift: DriftReport | null;
   planAdjustments: PlanAdjustment[] | null;
-
-  // A prompt queued for the tutor (e.g. a drift catch-up drill). Consumed once.
-  pendingPrompt: string | null;
 
   // Voice
   voiceConfig: VoiceConfig;
@@ -62,19 +96,27 @@ interface AppState {
 
   // Actions
   setView: (view: ViewType, pillar?: PillarId) => void;
+  startActivation: (pillar: PillarId) => void;
+  completeActivation: () => void;
+  setActivationQuizEnabled: (enabled: boolean) => void;
+  setActivationQuizLength: (length: number) => void;
   addMessage: (msg: AiMessage) => void;
   appendToken: (token: string) => void;
   finalizeStream: () => void;
   startStream: () => void;
   setActiveConversation: (id: string | null) => void;
-  setConversationList: (list: ConversationSummary[]) => void;
-  upsertConversation: (summary: ConversationSummary) => void;
+  setConversationList: (list: ConversationListEntry[]) => void;
+  upsertConversation: (summary: ConversationListEntry) => void;
   removeConversation: (id: string) => void;
+  setPendingPrompt: (prompt: string | null) => void;
   setProgress: (p: ProgressData) => void;
   setStreak: (s: number) => void;
+  setWeeklyDigests: (d: WeeklyDigest[]) => void;
+  setSelectedDigestWeek: (weekStart: string | null) => void;
+  setMasteryScores: (scores: MasteryScore[]) => void;
+  setKnowledgeGaps: (gaps: KnowledgeGap[]) => void;
   setPillarDrift: (d: DriftReport | null) => void;
   setPlanAdjustments: (a: PlanAdjustment[] | null) => void;
-  setPendingPrompt: (p: string | null) => void;
   setProviderConfig: (c: ProviderConfig) => void;
   toggleSidebar: () => void;
   setMobileSidebarOpen: (open: boolean) => void;
@@ -90,6 +132,10 @@ export const useAppStore = create<AppState>()(
       currentView: 'dashboard',
       activePillar: null,
 
+      pendingSessionPillar: null,
+      activationQuizEnabled: true,
+      activationQuizLength: 4,
+
       messages: [],
       isStreaming: false,
       currentToken: '',
@@ -101,13 +147,18 @@ export const useAppStore = create<AppState>()(
 
       activeConversationId: null,
       conversationList: [],
+      pendingPrompt: null,
 
       progress: null,
       streak: 0,
 
+      weeklyDigests: [],
+      selectedDigestWeek: null,
+      masteryByItem: {},
+      knowledgeGaps: null,
+
       pillarDrift: null,
       planAdjustments: null,
-      pendingPrompt: null,
 
       voiceConfig: {
         enabled: false,
@@ -127,6 +178,19 @@ export const useAppStore = create<AppState>()(
 
       setView: (view, pillar) =>
         set({ currentView: view, activePillar: pillar ?? get().activePillar }),
+
+      startActivation: (pillar) =>
+        set({ currentView: 'activation', pendingSessionPillar: pillar }),
+      completeActivation: () =>
+        set({ currentView: 'tutor', pendingSessionPillar: null }),
+      setActivationQuizEnabled: (enabled) => set({ activationQuizEnabled: enabled }),
+      setActivationQuizLength: (length) =>
+        set({
+          activationQuizLength: Math.min(
+            MAX_ACTIVATION_LENGTH,
+            Math.max(MIN_ACTIVATION_LENGTH, Math.round(length))
+          ),
+        }),
 
       addMessage: (msg) =>
         set((state) => ({ messages: [...state.messages, msg] })),
@@ -186,12 +250,22 @@ export const useAppStore = create<AppState>()(
           activeConversationId:
             state.activeConversationId === id ? null : state.activeConversationId,
         })),
+      setPendingPrompt: (prompt) => set({ pendingPrompt: prompt }),
 
       setProgress: (p) => set({ progress: p }),
       setStreak: (s) => set({ streak: s }),
+      setWeeklyDigests: (d) => set({ weeklyDigests: d }),
+      setSelectedDigestWeek: (weekStart) => set({ selectedDigestWeek: weekStart }),
+      setMasteryScores: (scores) =>
+        set(() => ({
+          masteryByItem: scores.reduce<Record<string, number>>((acc, s) => {
+            acc[s.itemId] = s.score;
+            return acc;
+          }, {}),
+        })),
+      setKnowledgeGaps: (gaps) => set({ knowledgeGaps: gaps }),
       setPillarDrift: (d) => set({ pillarDrift: d }),
       setPlanAdjustments: (a) => set({ planAdjustments: a }),
-      setPendingPrompt: (p) => set({ pendingPrompt: p }),
       setProviderConfig: (c) => set({ providerConfig: c }),
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
       setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
@@ -212,6 +286,8 @@ export const useAppStore = create<AppState>()(
         forgettingCurveSettings: state.forgettingCurveSettings,
         sidebarCollapsed: state.sidebarCollapsed,
         activePillar: state.activePillar,
+        activationQuizEnabled: state.activationQuizEnabled,
+        activationQuizLength: state.activationQuizLength,
       }),
     }
   )

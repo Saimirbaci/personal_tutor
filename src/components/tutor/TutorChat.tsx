@@ -171,11 +171,6 @@ export default function TutorChat() {
     setPendingPrompt: s.setPendingPrompt,
   }));
 
-  const { pendingPrompt, setPendingPrompt } = useAppStore((s) => ({
-    pendingPrompt: s.pendingPrompt,
-    setPendingPrompt: s.setPendingPrompt,
-  }));
-
   const { sendMessage, clearMessages } = useAI();
   const {
     loadConversationList,
@@ -249,11 +244,10 @@ export default function TutorChat() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingContent]);
 
-  // Consume a queued prompt (e.g. a drift catch-up drill) once, after mount.
-  const pendingSentRef = useRef(false);
+  // Consume a queued prompt (e.g. a drift catch-up drill, or a "Reply" from a
+  // summary's reflection). Cleared immediately so it's never re-sent.
   useEffect(() => {
-    if (pendingPrompt && !pendingSentRef.current && !isStreaming) {
-      pendingSentRef.current = true;
+    if (pendingPrompt && !isStreaming) {
       const prompt = pendingPrompt;
       setPendingPrompt(null);
       sendMessage(prompt, selectedPillar ?? undefined);
@@ -285,14 +279,6 @@ export default function TutorChat() {
       summariseSession(activeConvRef.current);
     };
   }, [summariseSession]);
-
-  // ── Consume a queued prompt (e.g. "Reply" from a summary's reflection) ────
-  useEffect(() => {
-    if (!pendingPrompt || isStreaming || !activeConversationId) return;
-    const prompt = pendingPrompt;
-    setPendingPrompt(null);
-    sendMessage(prompt, selectedPillar ?? undefined);
-  }, [pendingPrompt, isStreaming, activeConversationId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── New conversation ──────────────────────────────────────────────────────
   const handleNewConversation = useCallback(async () => {

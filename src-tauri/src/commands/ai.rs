@@ -97,6 +97,23 @@ pub async fn collect_completion(
     collector.await.map_err(|e| e.to_string())
 }
 
+/// One-shot, NON-streaming completion used for background tasks (e.g. session
+/// summaries). Never emits `ai-token`/`ai-done`/`ai-error`, so it can run
+/// concurrently with the live chat UI. Bounded by a 45s timeout.
+#[tauri::command]
+pub async fn summarize_conversation(
+    transcript: String,
+    system: Option<String>,
+    config: ProviderConfig,
+) -> Result<String, String> {
+    let messages = vec![AiMessage {
+        role: "user".to_string(),
+        content: transcript,
+    }];
+
+    collect_completion(messages, system, config, 45).await
+}
+
 #[tauri::command]
 pub fn get_providers() -> Vec<ProviderInfo> {
     vec![

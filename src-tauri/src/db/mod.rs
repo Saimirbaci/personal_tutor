@@ -107,6 +107,64 @@ pub fn init(app: &AppHandle) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_plan_adjustments_week
             ON plan_adjustments(week_start DESC);
+
+        CREATE TABLE IF NOT EXISTS conversation_summaries (
+            conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+            takeaways       TEXT NOT NULL,
+            reflection      TEXT NOT NULL,
+            flagged_items   TEXT NOT NULL,
+            model           TEXT,
+            created_at      TEXT NOT NULL,
+            updated_at      TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_conv_summary_created
+            ON conversation_summaries(created_at);
+
+        CREATE TABLE IF NOT EXISTS weekly_digests (
+            id          TEXT PRIMARY KEY,
+            week_start  TEXT NOT NULL UNIQUE,
+            week_end    TEXT NOT NULL,
+            week_number INTEGER NOT NULL,
+            content     TEXT NOT NULL,
+            metrics     TEXT NOT NULL,
+            created_at  TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_weekly_digests_week_start
+            ON weekly_digests(week_start DESC);
+
+        CREATE TABLE IF NOT EXISTS mastery_scores (
+            pillar_id     TEXT NOT NULL,
+            item_id       TEXT NOT NULL,
+            score         REAL NOT NULL DEFAULT 0,
+            quiz_accuracy REAL,
+            ease_norm     REAL,
+            depth_norm    REAL,
+            updated_at    TEXT NOT NULL,
+            PRIMARY KEY (pillar_id, item_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_mastery_pillar
+            ON mastery_scores(pillar_id);
+
+        CREATE TABLE IF NOT EXISTS knowledge_gaps (
+            gap_id            TEXT PRIMARY KEY,
+            pillar            TEXT NOT NULL,
+            topic_key         TEXT NOT NULL,
+            label             TEXT NOT NULL,
+            severity          REAL NOT NULL,
+            signal_summary    TEXT NOT NULL,
+            status            TEXT NOT NULL DEFAULT 'open',
+            first_detected_at TEXT NOT NULL,
+            last_updated_at   TEXT NOT NULL,
+            dismissed_until   TEXT,
+            last_drilled_at   TEXT,
+            UNIQUE(pillar, topic_key)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_knowledge_gaps_pillar
+            ON knowledge_gaps(pillar, status);
         ",
     )?;
 
