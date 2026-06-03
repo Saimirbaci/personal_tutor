@@ -1,6 +1,8 @@
 pub mod activation;
 pub mod ai;
+pub mod analytics;
 pub mod conversations;
+pub mod depth;
 pub mod digest;
 pub mod gaps;
 pub mod mastery;

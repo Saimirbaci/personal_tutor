@@ -148,6 +148,18 @@ pub fn init(app: &AppHandle) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_mastery_pillar
             ON mastery_scores(pillar_id);
 
+        CREATE TABLE IF NOT EXISTS mastery_snapshots (
+            week_start  TEXT NOT NULL,
+            pillar_id   TEXT NOT NULL,
+            avg_score   REAL NOT NULL,
+            item_count  INTEGER NOT NULL,
+            captured_at TEXT NOT NULL,
+            PRIMARY KEY (week_start, pillar_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_mastery_snapshots_pillar
+            ON mastery_snapshots(pillar_id, week_start);
+
         CREATE TABLE IF NOT EXISTS knowledge_gaps (
             gap_id            TEXT PRIMARY KEY,
             pillar            TEXT NOT NULL,
@@ -165,6 +177,20 @@ pub fn init(app: &AppHandle) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_knowledge_gaps_pillar
             ON knowledge_gaps(pillar, status);
+
+        CREATE TABLE IF NOT EXISTS conversation_depth (
+            conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+            score           INTEGER NOT NULL,
+            rationale       TEXT NOT NULL DEFAULT '',
+            dimensions      TEXT NOT NULL DEFAULT '[]',
+            model           TEXT,
+            message_count   INTEGER NOT NULL DEFAULT 0,
+            created_at      TEXT NOT NULL,
+            updated_at      TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_conversation_depth_created
+            ON conversation_depth(created_at);
         ",
     )?;
 

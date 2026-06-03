@@ -72,8 +72,12 @@ let messages = {
 ```
 
 ## Streaming AI Responses
+Providers do **not** emit Tauri events directly — they push tokens into an `mpsc::Sender<String>`. The *command layer* decides what to do with the channel:
+- `stream_chat` bridges the channel to Tauri events (`ai-token` per token, then `ai-done`/`ai-error`).
+- `collect_completion` (one-shot, for background classifiers like depth scoring) drains the channel into a `String` and returns it — no events emitted.
+
 ```rust
-// Pattern used in commands/ai.rs — emit Tauri events for each token
+// stream_chat: bridge the channel to window events
 let window = app.get_webview_window("main").ok_or("No window")?;
 window.emit("ai-token", token)?;
 // ...
@@ -81,7 +85,19 @@ window.emit("ai-done", ())?;
 // On error:
 window.emit("ai-error", error_message)?;
 ```
-Always emit `ai-done` or `ai-error` — never leave the frontend in a streaming state.
+Always emit `ai-done` or `ai-error` in event-driven flows — never leave the frontend in a streaming state.
+
+```rust
+// collect_completion: drain the channel into a String (no events)
+let (tx, mut rx) = mpsc::channel::<String>(256);
+let collector = tokio::spawn(async move {
+    let mut buf = String::new();
+    while let Some(token) = rx.recv().await { buf.push_str(&token); }
+    buf
+});
+provider.stream_completion(messages, system, tx).await.map_err(|e| e.to_string())?;
+collector.await.map_err(|e| e.to_string())
+```
 
 ### Non-Streaming Background AI
 For background features that need an AI rationale without touching the live chat stream (e.g. plan rebalancing), use `collect_completion(messages, system, config, timeout_secs)` in `commands/ai.rs`. It reuses the provider's `stream_completion` plumbing but collects tokens into a buffer via an mpsc channel instead of emitting them to the UI, bounded by a timeout. Returns the full text as `Result<String, String>`.
@@ -93,12 +109,16 @@ For background features that need an AI rationale without touching the live chat
 pub trait AiProvider: Send + Sync {
     async fn stream_completion(
         &self,
-        messages: Vec<Message>,
-        window: &WebviewWindow,
-    ) -> Result<(), String>;
+        messages: Vec<AiMessage>,
+        system: Option<String>,
+        event_emitter: Sender<String>,   // tokio::sync::mpsc::Sender — NOT a window
+    ) -> Result<()>;                      // anyhow::Result
+
+    fn default_model(&self) -> &str;
+    fn available_models(&self) -> Vec<String>;
 }
 ```
-All providers implement this trait. New providers go in `src-tauri/src/ai/`.
+All providers implement this trait and stay UI-agnostic (channel in, tokens out). The command layer adapts the channel to events or a collected string. New providers go in `src-tauri/src/ai/`.
 
 ## reqwest Usage
 - Use `reqwest::Client` with `stream` feature (already in Cargo.toml)

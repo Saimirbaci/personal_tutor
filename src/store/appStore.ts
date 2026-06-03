@@ -3,8 +3,10 @@ import { persist } from 'zustand/middleware';
 import {
   AiMessage,
   DriftReport,
+  EffortMasteryMatrix,
   ForgettingCurveSettings,
   KnowledgeGap,
+  LearningVelocity,
   MasteryScore,
   PillarId,
   PlanAdjustment,
@@ -90,6 +92,9 @@ interface AppState {
   // Knowledge gaps (ephemeral — recomputed from live signals, never persisted)
   knowledgeGaps: KnowledgeGap[] | null;
 
+  // Learning analytics (ephemeral — raw backend payloads, never persisted)
+  learningVelocity: LearningVelocity | null;
+  effortMatrix: EffortMasteryMatrix | null;
   // Drift & rebalancing (ephemeral — loaded from backend, never persisted)
   pillarDrift: DriftReport | null;
   planAdjustments: PlanAdjustment[] | null;
@@ -129,6 +134,8 @@ interface AppState {
   setSelectedDigestWeek: (weekStart: string | null) => void;
   setMasteryScores: (scores: MasteryScore[]) => void;
   setKnowledgeGaps: (gaps: KnowledgeGap[]) => void;
+  setLearningVelocity: (velocity: LearningVelocity | null) => void;
+  setEffortMatrix: (matrix: EffortMasteryMatrix | null) => void;
   setPillarDrift: (d: DriftReport | null) => void;
   setPlanAdjustments: (a: PlanAdjustment[] | null) => void;
   setProviderConfig: (c: ProviderConfig) => void;
@@ -169,6 +176,8 @@ export const useAppStore = create<AppState>()(
 
       progress: null,
       streak: 0,
+      learningVelocity: null,
+      effortMatrix: null,
 
       weeklyDigests: [],
       selectedDigestWeek: null,
@@ -299,6 +308,8 @@ export const useAppStore = create<AppState>()(
           }, {}),
         })),
       setKnowledgeGaps: (gaps) => set({ knowledgeGaps: gaps }),
+      setLearningVelocity: (velocity) => set({ learningVelocity: velocity }),
+      setEffortMatrix: (matrix) => set({ effortMatrix: matrix }),
       setPillarDrift: (d) => set({ pillarDrift: d }),
       setPlanAdjustments: (a) => set({ planAdjustments: a }),
       setProviderConfig: (c) => set({ providerConfig: c }),

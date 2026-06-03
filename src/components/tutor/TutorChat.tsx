@@ -9,13 +9,23 @@ import { runSessionSummary, useConversationSummary } from '@/hooks/useSessionSum
 import { useVoice } from '@/hooks/useVoice';
 import SummaryCard from '@/components/SummaryCard';
 import { useMobile } from '@/hooks/useMobile';
+import { runDepthScore } from '@/hooks/useDepthScore';
 import { PILLARS, PLAN } from '@/data/plan';
-import { PillarId, CurriculumItem } from '@/data/types';
+import { PillarId, CurriculumItem, ConversationDepth } from '@/data/types';
 import { singleReviewPrompt } from '@/lib/reviewPrompts';
 import { ConversationListEntry } from '@/store/appStore';
 import MessageBubble from './MessageBubble';
 import InputBar from './InputBar';
 import MarkdownContent from './MarkdownContent';
+import DepthIndicator from './DepthIndicator';
+
+/** Compact depth info kept per conversation for the sidebar index. */
+interface DepthSummary {
+  score: number;
+  rationale: string;
+}
+/** Cap rows pulled for the sidebar depth index. */
+const DEPTH_INDEX_LIMIT = 200;
 
 // ── Contextual prompt templates ────────────────────────────────────────────────
 
@@ -198,8 +208,49 @@ export default function TutorChat() {
   // Conversation sidebar: closed by default on mobile to give chat full width
   const [sidebarOpen, setSidebarOpen] = useState(!isMobile);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [depthById, setDepthById] = useState<Map<string, DepthSummary>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevStreamingRef = useRef(false);
+  // Latest active conversation id, read by the unmount/scoring cleanup.
+  const activeConvRef = useRef<string | null>(activeConversationId);
+  useEffect(() => {
+    activeConvRef.current = activeConversationId;
+  }, [activeConversationId]);
+
+  // ── Depth-score index for the sidebar ─────────────────────────────────────
+  const refreshDepthIndex = useCallback(async () => {
+    try {
+      const rows = await tauriInvoke<ConversationDepth[]>('list_conversation_depths', {
+        limit: DEPTH_INDEX_LIMIT,
+      });
+      setDepthById(
+        new Map(rows.map((r) => [r.conversationId, { score: r.score, rationale: r.rationale }]))
+      );
+    } catch (err) {
+      console.error('Failed to load depth index:', err);
+    }
+  }, []);
+
+  // Score a conversation (fire-and-forget) then refresh the index when it lands.
+  const scoreConversation = useCallback(
+    (id: string | null) => {
+      if (!id) return;
+      runDepthScore(id).then(refreshDepthIndex);
+    },
+    [refreshDepthIndex]
+  );
+
+  // Refresh the index on mount and whenever the conversation set / active thread changes.
+  useEffect(() => {
+    refreshDepthIndex();
+  }, [refreshDepthIndex, conversationList.length, activeConversationId]);
+
+  // On unmount / navigate-away, score the conversation we're leaving.
+  useEffect(() => {
+    return () => {
+      runDepthScore(activeConvRef.current ?? '');
+    };
+  }, []);
 
   // Read-only summary for the conversation currently open (shown at top of the thread).
   const { summary: activeSummary } = useConversationSummary(activeConversationId);
@@ -313,11 +364,6 @@ export default function TutorChat() {
   }, [isStreaming]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Summarise on navigate-away / unmount ──────────────────────────────────
-  // Track the latest active id in a ref so the unmount cleanup isn't stale.
-  const activeConvRef = useRef<string | null>(activeConversationId);
-  useEffect(() => {
-    activeConvRef.current = activeConversationId;
-  }, [activeConversationId]);
   useEffect(() => {
     return () => {
       summariseSession(activeConvRef.current);
@@ -326,16 +372,20 @@ export default function TutorChat() {
 
   // ── New conversation ──────────────────────────────────────────────────────
   const handleNewConversation = useCallback(async () => {
+    // Score the session we're ending before clearing it out.
+    scoreConversation(activeConversationId);
     summariseSession(activeConversationId); // session ending — summarise the old one
     endReviewSession(); // abandon any in-progress spaced-review drill
     clearMessages();
     await createConversation(selectedPillar);
-  }, [clearMessages, createConversation, selectedPillar, summariseSession, activeConversationId, endReviewSession]);
+  }, [scoreConversation, activeConversationId, clearMessages, createConversation, selectedPillar, summariseSession, endReviewSession]);
 
   // ── Switch to a conversation ──────────────────────────────────────────────
   const handleSelectConversation = useCallback(
     async (id: string) => {
       if (id === activeConversationId) return;
+      // Score the session we're leaving before switching away.
+      scoreConversation(activeConversationId);
       summariseSession(activeConversationId); // leaving the current session
       endReviewSession(); // leaving the review thread abandons the drill
       clearMessages();
@@ -343,7 +393,7 @@ export default function TutorChat() {
       const msgs = await loadConversationMessages(id);
       useAppStore.setState({ messages: msgs });
     },
-    [activeConversationId, clearMessages, setActiveConversation, loadConversationMessages, summariseSession, endReviewSession]
+    [activeConversationId, scoreConversation, clearMessages, setActiveConversation, loadConversationMessages, summariseSession, endReviewSession]
   );
 
   // ── Delete ────────────────────────────────────────────────────────────────
@@ -428,15 +478,21 @@ export default function TutorChat() {
                     onCancel={() => setRenamingId(null)}
                   />
                 ) : (
-                  <>
-                    <p className="text-[11px] truncate">{conv.title}</p>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <p className="text-[11px] truncate flex-1 min-w-0">{conv.title}</p>
+                    {depthById.has(conv.id) && (
+                      <DepthIndicator
+                        score={depthById.get(conv.id)!.score}
+                        rationale={depthById.get(conv.id)!.rationale}
+                      />
+                    )}
                     {summarisedIds.has(conv.id) && (
-                      <span className="mt-0.5 inline-flex items-center gap-1 text-[9px] text-[#2E5FA3]/80">
+                      <span className="inline-flex items-center gap-1 text-[9px] text-[#2E5FA3]/80">
                         <FileText size={9} />
                         Summary
                       </span>
                     )}
-                  </>
+                  </div>
                 )}
               </div>
 

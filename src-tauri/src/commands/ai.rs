@@ -67,12 +67,14 @@ pub async fn stream_chat(
 /// into a buffer rather than emitted to the UI. Used by background features
 /// (e.g. weekly plan rebalancing) that need an AI rationale without touching
 /// the live chat stream. Bounded by `timeout_secs` so a hung provider can't
-/// block app launch.
+/// block app launch. `timeout_secs` is optional and defaults to 45 seconds
+/// when omitted by the caller.
+#[tauri::command]
 pub async fn collect_completion(
     messages: Vec<AiMessage>,
     system: Option<String>,
     config: ProviderConfig,
-    timeout_secs: u64,
+    timeout_secs: Option<u64>,
 ) -> Result<String, String> {
     let provider = make_provider(config);
     let (tx, mut rx) = mpsc::channel::<String>(256);
@@ -87,7 +89,10 @@ pub async fn collect_completion(
 
     let completion = provider.stream_completion(messages, system, tx);
 
-    tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), completion)
+    tokio::time::timeout(
+        std::time::Duration::from_secs(timeout_secs.unwrap_or(45)),
+        completion,
+    )
         .await
         .map_err(|_| "AI request timed out".to_string())?
         .map_err(|e| e.to_string())?;
@@ -111,9 +116,8 @@ pub async fn summarize_conversation(
         content: transcript,
     }];
 
-    collect_completion(messages, system, config, 45).await
+    collect_completion(messages, system, config, Some(45)).await
 }
-
 #[tauri::command]
 pub fn get_providers() -> Vec<ProviderInfo> {
     vec![

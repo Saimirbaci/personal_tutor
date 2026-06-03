@@ -2,7 +2,11 @@ pub mod ai;
 pub mod commands;
 pub mod db;
 
-use commands::{activation, ai as ai_cmd, conversations as conv_cmd, digest as digest_cmd, gaps, mastery, progress, rebalance, review, schedule, summaries as summary_cmd, sync_server as sync_cmd, voice as voice_cmd};
+use commands::{
+    activation, ai as ai_cmd, analytics, conversations as conv_cmd, depth, digest as digest_cmd,
+    gaps, mastery, progress, rebalance, review, schedule, summaries as summary_cmd,
+    sync_server as sync_cmd, voice as voice_cmd,
+};
 use sync_cmd::SyncServerHandle;
 use tauri::Manager;
 use tokio::sync::Mutex;
@@ -20,6 +24,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             ai_cmd::stream_chat,
+            ai_cmd::collect_completion,
             ai_cmd::get_providers,
             ai_cmd::get_ollama_models,
             ai_cmd::get_openrouter_models,
@@ -47,12 +52,19 @@ pub fn run() {
             ai_cmd::summarize_conversation,
             mastery::recompute_mastery,
             mastery::get_mastery_scores,
+            // Learning analytics commands
+            analytics::get_learning_velocity,
+            analytics::get_effort_mastery_matrix,
             activation::get_activation_quiz,
             // Knowledge gap commands
             gaps::get_knowledge_gaps,
             gaps::detect_knowledge_gaps,
             gaps::dismiss_gap,
             gaps::mark_gap_drilled,
+            // Session depth scoring commands
+            depth::save_conversation_depth,
+            depth::get_conversation_depth,
+            depth::list_conversation_depths,
             schedule::get_today_schedule,
             schedule::schedule_notification,
             schedule::get_morning_briefing,

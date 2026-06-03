@@ -20,7 +20,7 @@ Frontend (React 18 + Vite + Tailwind, port 1420)
 │   ├── hooks/               → Custom hooks (useAI, useVoice, useProgress, etc.)
 │   ├── store/               → Zustand store (appStore.ts — single store with persist)
 │   ├── data/                → Static data (pillars.ts, curriculum.ts) and types.ts
-│   └── lib/                 → Utilities (tauri.ts wrappers, formatters)
+│   └── lib/                 → Utilities (tauri.ts wrappers, genui.ts helpers, formatters)
 │
 Rust Backend (Tauri v2 + rusqlite + Tokio)
 └── src-tauri/src/
@@ -31,6 +31,10 @@ Rust Backend (Tauri v2 + rusqlite + Tokio)
     │   ├── conversations.rs → CRUD + bulk_import_sync
     │   ├── progress.rs      → log_session, get_progress, get_streak, update_milestone
     │   ├── review.rs        → SM-2 spaced repetition (record_review_attempt, get_due_reviews, get_review_counts)
+    │   ├── mastery.rs       → per-topic mastery scoring (recompute_mastery, get_mastery_scores)
+    │   ├── activation.rs    → pre-session activation quiz (get_activation_quiz)
+    │   ├── gaps.rs          → knowledge-gap detection (get_knowledge_gaps, detect_knowledge_gaps, dismiss_gap, mark_gap_drilled)
+    │   ├── depth.rs         → session depth scoring (save/get/list_conversation_depth)
     │   ├── rebalance.rs     → drift detection + adaptive plan rebalancing (get_pillar_drift, generate/apply/dismiss_plan_adjustment, maybe_generate_due_rebalance, get/set_rebalance_settings)
     │   ├── schedule.rs      → get_today_schedule, schedule_notification
     │   ├── sync_server.rs   → Axum-based local sync server (start/stop/status)
@@ -59,6 +63,8 @@ AI responses can embed interactive UI blocks using this syntax:
 ```
 `parseGenUIBlocks()` in `appStore.ts::finalizeStream()` strips these from the visible text and attaches them as `AiMessage.genui`. The `GenUIRenderer` component renders each block type.
 
+**Non-rendered GenUI (classifier contract):** some blocks are an output *contract* for a background classifier rather than UI. `<genui type="depth-score">{"score": N, "rationale": "...", "dimensions": [...]}</genui>` is emitted by the session-depth classifier and parsed by `parseDepthScore()` in `src/lib/genui.ts` — it is never shown in chat. `src/lib/genui.ts` also holds `stripGenUITags()` (removes `<genui>` blocks from a transcript before sending it to a classifier) and `DEPTH_SCORE_PROMPT` (the classifier system prompt). See **Session Depth Scoring** below.
+
 ## AI Streaming
 All AI responses stream via Tauri events — never polled:
 - `ai-token` → `appendToken(token)` in store
@@ -79,12 +85,16 @@ SQLite at `{app_data_dir}/tutor.db`. WAL mode, foreign keys ON.
 - **`conversations`** — chat conversation metadata (pillar, title)
 - **`chat_messages`** — individual messages (role, content, genui JSON)
 - **`review_items`** — SM-2 spaced repetition state (item_id, item_type, pillar, ease_factor, interval_days, repetitions, next_due)
+- **`mastery_scores`** — per-topic mastery (PK `pillar_id`+`item_id`; score, quiz_accuracy, ease_norm, depth_norm)
+- **`knowledge_gaps`** — auto-detected gaps (PK `gap_id`; pillar, topic_key, severity, signal_summary, status; UNIQUE pillar+topic_key)
+- **`conversation_depth`** — engagement-depth assessment per conversation (PK `conversation_id` → conversations ON DELETE CASCADE; score 1–5, rationale, dimensions JSON, model, message_count)
+- **`settings`** — key/value store
 - **`plan_adjustments`** — weekly rebalance proposals (week_start UNIQUE, week_number, rationale, adjustments JSON, status proposed/applied/dismissed, applied_at)
 - **`settings`** — key/value store (also holds rebalance settings, e.g. `drift_threshold_days`)
 
 Two DB access patterns coexist:
 - `DbState(Mutex<Connection>)` — shared connection, locked per call (used by most commands)
-- `db::get_connection(&app)` — opens a fresh `rusqlite::Connection` per call (used by `review.rs`); safe under WAL but bypasses the shared mutex
+- `db::get_connection(&app)` — opens a fresh `rusqlite::Connection` per call (used by `review.rs` and all newer feature commands: `mastery.rs`, `activation.rs`, `gaps.rs`, `depth.rs`); safe under WAL but bypasses the shared mutex. Preferred for synchronous `#[tauri::command] pub fn` handlers that don't share state.
 
 ## Sync Server
 Axum HTTP server on a local port (start/stop via Tauri commands). Used to sync conversations from mobile/web to desktop. `SyncServerHandle(Mutex<Option<...>>)` managed as Tauri app state.
@@ -104,7 +114,7 @@ Default: `anthropic / claude-sonnet-4-5`.
 
 ## Key Types
 All TypeScript interfaces in `src/data/types.ts`. Match Rust serde structs exactly (camelCase).
-Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`, `PillarDrift`, `DriftReport`, `PillarStatus`, `AdjustmentStatus`, `PillarAdjustment`, `PlanAdjustment`, `RebalanceSettings`.
+Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`, `MasteryScore`, `ActivationResult`, `KnowledgeGap`, `GapSignalKind`, `DepthScore`, `DepthScoreData`, `ConversationDepth`, `PillarDrift`, `DriftReport`, `PillarStatus`, `AdjustmentStatus`, `PillarAdjustment`, `PlanAdjustment`, `RebalanceSettings`.
 
 ## Spaced Repetition
 SM-2 algorithm in `src-tauri/src/commands/review.rs`. Quality grades 0–5 (≥3 passes). Failed reviews reset interval to 1 day; ease factor floored at 1.3.
@@ -112,6 +122,23 @@ SM-2 algorithm in `src-tauri/src/commands/review.rs`. Quality grades 0–5 (≥3
 - Item IDs derived deterministically via `buildReviewItemId(type, pillar, question)` (djb2 hash) so the same flashcard/quiz across sessions maps to one review row
 - `Flashcard` and `Quiz` GenUI renderers call `recordAttempt` on user interaction
 - `ReviewWidget` on the Dashboard surfaces due-count
+
+## Per-Topic Mastery
+`mastery.rs` computes a 0–1 mastery score per `(pillar_id, item_id)` blending quiz accuracy, normalized SM-2 ease, and depth signals (`quiz_accuracy`, `ease_norm`, `depth_norm`). Commands: `recompute_mastery`, `get_mastery_scores`. Frontend hook: `useMastery`. Type: `MasteryScore`.
+
+## Pre-Session Activation Quiz
+`activation.rs::get_activation_quiz` generates a short warm-up quiz to prime recall before a study session. Frontend hook: `useActivationQuiz`. Type: `ActivationResult`.
+
+## Knowledge Gap Auto-Detection
+`gaps.rs` detects weak topics from signals (`weak_quiz`, `low_ease`, `shallow_chat`, `stale` — see `GapSignalKind`) and persists them to `knowledge_gaps` (UNIQUE per pillar+topic_key). Commands: `get_knowledge_gaps`, `detect_knowledge_gaps`, `dismiss_gap`, `mark_gap_drilled`. Frontend hook: `useKnowledgeGaps`. Type: `KnowledgeGap`.
+
+## Session Depth Scoring
+Rates how deeply a learner engaged in a conversation on a 1–5 rubric (1 = surface Q&A, 5 = Socratic + applied scenarios + edge cases). Runs as a **fire-and-forget background classification** — it never touches the live chat stream.
+- `ai.rs::collect_completion` — one-shot, non-streaming completion. Collects every token into a `String` (via an mpsc collector task) and returns it instead of emitting `ai-token`/`ai-done`. Used by classifiers that need a result without driving the chat UI.
+- `src/lib/genui.ts` — `DEPTH_SCORE_PROMPT` (classifier system prompt), `stripGenUITags()` (clean transcript), `parseDepthScore()` (tolerant parse of the `<genui type="depth-score">` block or bare JSON; clamps score to 1–5, defaults `dimensions` to `[]`, returns `null` on failure).
+- `src/hooks/useDepthScore.ts` — `runDepthScore(conversationId, {force?})` is idempotent and concurrency-safe (module-scoped `inFlight` dedupe, skips while `isStreaming`, short-circuits if already scored, swallows errors). `useConversationDepth(id)` reads a single assessment. `TutorChat` triggers scoring on navigate-away/new/switch/unmount and shows a `DepthIndicator` chip in the sidebar.
+- `depth.rs` — `save_conversation_depth` (clamps 1–5, preserves original `created_at` on re-score, bumps the conversation's `updated_at`), `get_conversation_depth`, `list_conversation_depths`. Persists to `conversation_depth`. Has unit tests for clamping, float/string-score tolerance, malformed dimensions, and list ordering.
+- Types: `DepthScore` (1|2|3|4|5), `DepthScoreData`, `ConversationDepth`.
 
 ## Drift Detection & Adaptive Rebalancing
 "Drift" = Growth Pillars that have planned hours but no recent activity (older than the drift threshold, default 7 days). Logic lives in `src-tauri/src/commands/rebalance.rs` (per-call `db::get_connection` pattern, like `review.rs`). Pure helpers `compute_drift`, `compute_rebalance`, and `load_applied_adjustments` are unit-tested.
@@ -134,6 +161,7 @@ Custom agents for specialized tasks:
 - `staff-frontend-dev` — React/TypeScript frontend (components, hooks, state)
 - `staff-planner` — Architecture planning and implementation strategies
 - `staff-code-reviewer` — Code quality, patterns, and consistency checks
+- `staff-build-error-resolver` — Resolve Rust/Tauri build, TypeScript type, and cargo/npm dependency errors
 - `staff-tdd-guide` — Test-driven development for Rust/TypeScript
 - `staff-security-reviewer` — Security-sensitive changes (prompts, API keys, sync server)
 - `staff-qa-testing-engineer` — QA test plans and manual testing checklists
@@ -146,7 +174,7 @@ Custom slash commands for workflow automation:
 - `/add-feature` — Scaffold new features
 - `/refactor-clean` — Review and improve code quality
 - `/stack-status` — Show project build and test status
-- `/update-skills` — Refresh Claude skills
+- `/update-skills` — Audit and update `.claude/` agents, rules, and CLAUDE.md against the current codebase
 
 ### `.claude/rules/`
 Centralized coding standards organized by domain:

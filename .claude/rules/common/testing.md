@@ -67,3 +67,12 @@ The `parseGenUIBlocks` function in `appStore.ts` is core to the learning experie
 - `diagram` and `key-insight` types return data as raw string (no JSON parse)
 - Multiple blocks in one response are all extracted
 - Malformed JSON inside a tag falls back to raw string (no crash)
+
+## Classifier Parsers (`src/lib/genui.ts`)
+Background classifiers (e.g. session depth scoring) reuse GenUI as an output contract. When changing `src/lib/genui.ts`, verify:
+- `parseDepthScore` extracts the payload from a `<genui type="depth-score">` block **and** from a bare JSON object (fallback)
+- Score is clamped to 1–5; float (`4.0`) and stringified (`"3"`) scores are tolerated
+- `dimensions` defaults to `[]` when missing or non-array; `rationale` defaults to `''`
+- Returns `null` (never throws) on unparseable input or a missing/non-numeric score
+- `stripGenUITags` removes every `<genui>` block so a transcript carries only prose
+- The Rust side mirrors these guarantees in `depth.rs::parse_depth_payload` — keep the two parsers' clamping/fallback behavior in sync. `depth.rs` has unit tests (clamp, float/string scores, malformed dimensions, save/get roundtrip, list ordering/limit) — use it as the model for new command-file tests.

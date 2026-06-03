@@ -1,12 +1,25 @@
+import { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useAppStore } from '@/store/appStore';
 import { PILLARS } from '@/data/plan';
 import { formatHours, formatDateShort } from '@/lib/utils';
 import { PillarId } from '@/data/types';
+import { useAnalytics } from '@/hooks/useAnalytics';
+import LearningVelocityCard from './LearningVelocityCard';
+import EffortMasteryMatrix from './EffortMasteryMatrix';
 import PlanRebalanceCard from './PlanRebalanceCard';
 
 export default function ProgressView() {
   const { progress, streak } = useAppStore();
+  const { loadAll } = useAnalytics();
+  const loadedRef = useRef(false);
+
+  // Load analytics once on mount (guard against StrictMode double-invoke).
+  useEffect(() => {
+    if (loadedRef.current) return;
+    loadedRef.current = true;
+    loadAll();
+  }, [loadAll]);
 
   const pillars = PILLARS;
 
@@ -47,6 +60,12 @@ export default function ProgressView() {
         >
           <PlanRebalanceCard />
         </motion.div>
+
+        {/* Learning velocity — pace, WoW mastery delta, completion confidence */}
+        <LearningVelocityCard />
+
+        {/* Effort vs mastery 2×2 — quick wins vs diminishing returns */}
+        <EffortMasteryMatrix />
 
         {/* Pillar breakdown */}
         <motion.div
