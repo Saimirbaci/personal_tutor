@@ -64,6 +64,9 @@ interface AppState {
   // A prompt queued by another view (e.g. a summary's "Reply" or a drift
   // catch-up drill) to be sent once the tutor opens. Consumed once.
   pendingPrompt: string | null;
+  // When true, the queued prompt should open in a brand-new conversation
+  // (e.g. a spaced-review drill) rather than the resumed last one.
+  pendingPromptFresh: boolean;
 
   // Progress
   progress: ProgressData | null;
@@ -108,7 +111,7 @@ interface AppState {
   setConversationList: (list: ConversationListEntry[]) => void;
   upsertConversation: (summary: ConversationListEntry) => void;
   removeConversation: (id: string) => void;
-  setPendingPrompt: (prompt: string | null) => void;
+  setPendingPrompt: (prompt: string | null, fresh?: boolean) => void;
   setProgress: (p: ProgressData) => void;
   setStreak: (s: number) => void;
   setWeeklyDigests: (d: WeeklyDigest[]) => void;
@@ -148,6 +151,7 @@ export const useAppStore = create<AppState>()(
       activeConversationId: null,
       conversationList: [],
       pendingPrompt: null,
+      pendingPromptFresh: false,
 
       progress: null,
       streak: 0,
@@ -250,7 +254,8 @@ export const useAppStore = create<AppState>()(
           activeConversationId:
             state.activeConversationId === id ? null : state.activeConversationId,
         })),
-      setPendingPrompt: (prompt) => set({ pendingPrompt: prompt }),
+      setPendingPrompt: (prompt, fresh = false) =>
+        set({ pendingPrompt: prompt, pendingPromptFresh: prompt ? fresh : false }),
 
       setProgress: (p) => set({ progress: p }),
       setStreak: (s) => set({ streak: s }),
@@ -306,16 +311,30 @@ function parseGenUIBlocks(content: string): { text: string; blocks: import('@/da
     matches.push({ full: match[0], type: match[1], data: match[2].trim() });
   }
 
+  // Types whose body is rendered as a raw string (no JSON parse).
+  const rawTypes = new Set(['diagram', 'key-insight']);
+
   for (const m of matches) {
     cleanText = cleanText.replace(m.full, '');
-    let parsedData: unknown = m.data;
 
+    if (rawTypes.has(m.type)) {
+      blocks.push({ type: m.type as import('@/data/types').GenUIBlock['type'], data: m.data });
+      continue;
+    }
+
+    // Structured blocks must contain valid JSON. If the model emitted prose
+    // (e.g. a conversational "what's your answer?") inside the tag, the parse
+    // fails — drop the block rather than handing a string to a renderer that
+    // expects an object (which would crash, e.g. quiz's data.options.map).
+    let parsedData: unknown;
     try {
-      if (m.type !== 'diagram' && m.type !== 'key-insight') {
-        parsedData = JSON.parse(m.data);
-      }
+      parsedData = JSON.parse(m.data);
     } catch {
-      parsedData = m.data;
+      continue;
+    }
+
+    if (!isValidBlockData(m.type, parsedData)) {
+      continue;
     }
 
     blocks.push({
@@ -324,5 +343,32 @@ function parseGenUIBlocks(content: string): { text: string; blocks: import('@/da
     });
   }
 
+  // Strip any orphaned/half-streamed genui tags the matcher couldn't pair up,
+  // so a stray "</genui>" never leaks into the visible message text.
+  cleanText = cleanText.replace(/<\/?genui[^>]*>/g, '');
+
   return { text: cleanText.trim(), blocks };
+}
+
+/** Minimal shape validation so a structurally-wrong block is dropped instead of
+ *  crashing its renderer. Only checks the fields each renderer dereferences. */
+function isValidBlockData(type: string, data: unknown): boolean {
+  if (typeof data !== 'object' || data === null) return false;
+  const d = data as Record<string, unknown>;
+  switch (type) {
+    case 'quiz':
+      return Array.isArray(d.options) && typeof d.question === 'string';
+    case 'flashcard':
+      return typeof d.question === 'string' && typeof d.answer === 'string';
+    case 'code':
+      return typeof d.code === 'string';
+    case 'concept-map':
+      return Array.isArray(d.nodes) && Array.isArray(d.edges);
+    case 'timeline':
+      return Array.isArray(d.events);
+    case 'session-summary':
+      return Array.isArray(d.takeaways) || typeof d.reflection === 'string';
+    default:
+      return true;
+  }
 }

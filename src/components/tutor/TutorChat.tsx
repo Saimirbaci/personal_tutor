@@ -158,6 +158,7 @@ export default function TutorChat() {
     conversationList,
     setActiveConversation,
     pendingPrompt,
+    pendingPromptFresh,
     setPendingPrompt,
   } = useAppStore((s) => ({
     messages: s.messages,
@@ -168,6 +169,7 @@ export default function TutorChat() {
     conversationList: s.conversationList,
     setActiveConversation: s.setActiveConversation,
     pendingPrompt: s.pendingPrompt,
+    pendingPromptFresh: s.pendingPromptFresh,
     setPendingPrompt: s.setPendingPrompt,
   }));
 
@@ -220,11 +222,15 @@ export default function TutorChat() {
     void runSessionSummary(conversationId);
   }, []);
 
-  // ── On mount: load conversation list and open/create the latest ───────────
+  // ── On mount: load conversation list and open/create the right thread ──────
   useEffect(() => {
     async function init() {
       const list = await loadConversationList();
-      if (list.length > 0) {
+      // A queued review/drill drill wants a clean thread, not the last chat.
+      if (useAppStore.getState().pendingPromptFresh) {
+        clearMessages();
+        await createConversation(selectedPillar);
+      } else if (list.length > 0) {
         // Resume the most-recent conversation
         const latest = list[0];
         setActiveConversation(latest.id);
@@ -244,15 +250,44 @@ export default function TutorChat() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingContent]);
 
-  // Consume a queued prompt (e.g. a drift catch-up drill, or a "Reply" from a
-  // summary's reflection). Cleared immediately so it's never re-sent.
+  // Consume a queued prompt (e.g. a spaced-review drill, a drift catch-up, or a
+  // "Reply" from a summary's reflection). Cleared immediately so it's never
+  // re-sent. A `fresh` prompt arriving while already mounted spins up a new
+  // conversation first so the drill doesn't land in the current thread.
+  const startingFreshRef = useRef(false);
   useEffect(() => {
-    if (pendingPrompt && !isStreaming) {
-      const prompt = pendingPrompt;
-      setPendingPrompt(null);
+    if (!pendingPrompt || isStreaming || startingFreshRef.current) return;
+    const prompt = pendingPrompt;
+    const fresh = pendingPromptFresh;
+    setPendingPrompt(null);
+
+    if (fresh && activeConversationId && messages.length > 0) {
+      // Already in a populated thread — open a clean one before drilling.
+      startingFreshRef.current = true;
+      (async () => {
+        summariseSession(activeConversationId);
+        clearMessages();
+        await createConversation(selectedPillar);
+        startingFreshRef.current = false;
+        sendMessage(prompt, selectedPillar ?? undefined);
+      })();
+    } else {
+      // Fresh-on-mount is handled by init(); just send into the active thread.
       sendMessage(prompt, selectedPillar ?? undefined);
     }
-  }, [pendingPrompt, isStreaming, sendMessage, selectedPillar, setPendingPrompt]);
+  }, [
+    pendingPrompt,
+    pendingPromptFresh,
+    isStreaming,
+    activeConversationId,
+    messages.length,
+    sendMessage,
+    selectedPillar,
+    setPendingPrompt,
+    summariseSession,
+    clearMessages,
+    createConversation,
+  ]);
 
   // TTS: auto-speak the last assistant message when streaming finishes
   useEffect(() => {
