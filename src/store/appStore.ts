@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { AiMessage, KnowledgeGap, MasteryScore, PillarId, ProgressData, ProviderConfig, VoiceConfig } from '@/data/types';
+import { AiMessage, EffortMasteryMatrix, KnowledgeGap, LearningVelocity, MasteryScore, PillarId, ProgressData, ProviderConfig, VoiceConfig } from '@/data/types';
 
 export interface ConversationSummary {
   id: string;
@@ -48,6 +48,10 @@ interface AppState {
   // Knowledge gaps (ephemeral — recomputed from live signals, never persisted)
   knowledgeGaps: KnowledgeGap[] | null;
 
+  // Learning analytics (ephemeral — raw backend payloads, never persisted)
+  learningVelocity: LearningVelocity | null;
+  effortMatrix: EffortMasteryMatrix | null;
+
   // A drill prompt to auto-send when the tutor view next opens (ephemeral)
   pendingPrompt: string | null;
 
@@ -77,6 +81,8 @@ interface AppState {
   setStreak: (s: number) => void;
   setMasteryScores: (scores: MasteryScore[]) => void;
   setKnowledgeGaps: (gaps: KnowledgeGap[]) => void;
+  setLearningVelocity: (velocity: LearningVelocity | null) => void;
+  setEffortMatrix: (matrix: EffortMasteryMatrix | null) => void;
   setPendingPrompt: (prompt: string | null) => void;
   setProviderConfig: (c: ProviderConfig) => void;
   toggleSidebar: () => void;
@@ -111,6 +117,8 @@ export const useAppStore = create<AppState>()(
       progress: null,
       streak: 0,
       knowledgeGaps: null,
+      learningVelocity: null,
+      effortMatrix: null,
       pendingPrompt: null,
 
       masteryByItem: {},
@@ -214,6 +222,8 @@ export const useAppStore = create<AppState>()(
           }, {}),
         })),
       setKnowledgeGaps: (gaps) => set({ knowledgeGaps: gaps }),
+      setLearningVelocity: (velocity) => set({ learningVelocity: velocity }),
+      setEffortMatrix: (matrix) => set({ effortMatrix: matrix }),
       setPendingPrompt: (prompt) => set({ pendingPrompt: prompt }),
       setProviderConfig: (c) => set({ providerConfig: c }),
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),

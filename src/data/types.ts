@@ -238,6 +238,71 @@ export interface CurriculumItemRef {
   topic: string;
 }
 
+// ── Learning Velocity & Effort-vs-Mastery Analytics ────────────────────────────
+
+/** Projected sprint-completion confidence for one pillar.
+ *  Mirrors the Rust `PillarProjection` serde struct (camelCase). */
+export type ProjectionStatus = 'onTrack' | 'atRisk' | 'behind' | 'insufficientData';
+
+export interface PillarProjection {
+  pillarId: PillarId;
+  status: ProjectionStatus;
+  loggedHours: number;
+  targetHours: number;
+  /** Hours/week needed over the remaining sprint to hit target. */
+  requiredPace: number;
+  /** Observed hours/week so far. */
+  actualPace: number;
+  /** Projected % of target reached by sprint end at the current pace. */
+  projectedPercent: number;
+}
+
+export interface PillarVelocity {
+  pillarId: PillarId;
+  topicsThisWeek: number;
+  topicsPerWeekAvg: number;
+  masteryDeltaWoW: number | null;
+  projection: PillarProjection;
+}
+
+/** Mirrors the Rust `LearningVelocity` serde struct (camelCase). */
+export interface LearningVelocity {
+  pillars: PillarVelocity[];
+  topicsThisWeek: number;
+  topicsPerWeekAvg: number;
+  masteryDeltaWoW: number | null;
+  sessionsThisWeek: number;
+  weeksElapsed: number;
+  weeksRemaining: number;
+  /** Pillars projected behind or at-risk — drives the "may not finish" banner. */
+  atRiskCount: number;
+}
+
+export type EffortMasteryQuadrant =
+  | 'quickWin'
+  | 'diminishingReturns'
+  | 'building'
+  | 'coasting';
+
+/** One pillar's position in the 2×2. Mirrors Rust `EffortMasteryPoint`. */
+export interface EffortMasteryPoint {
+  pillarId: PillarId;
+  /** Total logged hours (effort axis). */
+  effort: number;
+  /** Current avg mastery minus earliest snapshot baseline (gain axis). */
+  masteryGain: number;
+  /** Current avg mastery 0–100, for tooltip context. */
+  currentMastery: number;
+  quadrant: EffortMasteryQuadrant;
+}
+
+/** Mirrors the Rust `EffortMasteryMatrix` serde struct (camelCase). */
+export interface EffortMasteryMatrix {
+  points: EffortMasteryPoint[];
+  effortThreshold: number;
+  masteryThreshold: number;
+}
+
 // ── Pre-Session Activation Quiz ────────────────────────────────────────────────
 
 /** Where an activation question was assembled from. */

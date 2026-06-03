@@ -108,6 +108,18 @@ pub fn init(app: &AppHandle) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_mastery_pillar
             ON mastery_scores(pillar_id);
 
+        CREATE TABLE IF NOT EXISTS mastery_snapshots (
+            week_start  TEXT NOT NULL,
+            pillar_id   TEXT NOT NULL,
+            avg_score   REAL NOT NULL,
+            item_count  INTEGER NOT NULL,
+            captured_at TEXT NOT NULL,
+            PRIMARY KEY (week_start, pillar_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_mastery_snapshots_pillar
+            ON mastery_snapshots(pillar_id, week_start);
+
         CREATE TABLE IF NOT EXISTS knowledge_gaps (
             gap_id            TEXT PRIMARY KEY,
             pillar            TEXT NOT NULL,

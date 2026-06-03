@@ -2,7 +2,7 @@ pub mod ai;
 pub mod commands;
 pub mod db;
 
-use commands::{activation, ai as ai_cmd, conversations as conv_cmd, depth, gaps, mastery, progress, review, schedule, sync_server as sync_cmd, voice as voice_cmd};
+use commands::{activation, ai as ai_cmd, analytics, conversations as conv_cmd, depth, gaps, mastery, progress, review, schedule, sync_server as sync_cmd, voice as voice_cmd};
 use sync_cmd::SyncServerHandle;
 use tauri::Manager;
 use tokio::sync::Mutex;
@@ -41,6 +41,9 @@ pub fn run() {
             review::get_review_counts,
             mastery::recompute_mastery,
             mastery::get_mastery_scores,
+            // Learning analytics commands
+            analytics::get_learning_velocity,
+            analytics::get_effort_mastery_matrix,
             activation::get_activation_quiz,
             // Knowledge gap commands
             gaps::get_knowledge_gaps,

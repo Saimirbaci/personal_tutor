@@ -50,6 +50,87 @@ function getMockData<T>(cmd: string, args?: Record<string, unknown>): Promise<T>
   }
 
   const mocks: Record<string, unknown> = {
+    get_learning_velocity: {
+      pillars: [
+        {
+          pillarId: 'llm',
+          topicsThisWeek: 3,
+          topicsPerWeekAvg: 2.5,
+          masteryDeltaWoW: 8.4,
+          projection: {
+            pillarId: 'llm',
+            status: 'onTrack',
+            loggedHours: 18,
+            targetHours: 36,
+            requiredPace: 3,
+            actualPace: 3.2,
+            projectedPercent: 102,
+          },
+        },
+        {
+          pillarId: 'hardware',
+          topicsThisWeek: 1,
+          topicsPerWeekAvg: 1.2,
+          masteryDeltaWoW: -2.1,
+          projection: {
+            pillarId: 'hardware',
+            status: 'atRisk',
+            loggedHours: 6,
+            targetHours: 24,
+            requiredPace: 3,
+            actualPace: 1.5,
+            projectedPercent: 78,
+          },
+        },
+        {
+          pillarId: 'sales',
+          topicsThisWeek: 0,
+          topicsPerWeekAvg: 0.5,
+          masteryDeltaWoW: null,
+          projection: {
+            pillarId: 'sales',
+            status: 'behind',
+            loggedHours: 2,
+            targetHours: 24,
+            requiredPace: 4,
+            actualPace: 0.5,
+            projectedPercent: 32,
+          },
+        },
+        {
+          pillarId: 'voice',
+          topicsThisWeek: 0,
+          topicsPerWeekAvg: 0,
+          masteryDeltaWoW: null,
+          projection: {
+            pillarId: 'voice',
+            status: 'insufficientData',
+            loggedHours: 0,
+            targetHours: 18,
+            requiredPace: 1.5,
+            actualPace: 0,
+            projectedPercent: 0,
+          },
+        },
+      ],
+      topicsThisWeek: 4,
+      topicsPerWeekAvg: 2.1,
+      masteryDeltaWoW: 4.6,
+      sessionsThisWeek: 5,
+      weeksElapsed: 6,
+      weeksRemaining: 6,
+      atRiskCount: 2,
+    },
+    get_effort_mastery_matrix: {
+      points: [
+        { pillarId: 'llm', effort: 18, masteryGain: 22, currentMastery: 72, quadrant: 'building' },
+        { pillarId: 'hardware', effort: 9, masteryGain: 4, currentMastery: 38, quadrant: 'diminishingReturns' },
+        { pillarId: 'sales', effort: 1.5, masteryGain: 28, currentMastery: 55, quadrant: 'quickWin' },
+        { pillarId: 'communication', effort: 1, masteryGain: 3, currentMastery: 20, quadrant: 'coasting' },
+      ],
+      effortThreshold: 5,
+      masteryThreshold: 13,
+    },
     get_providers: [
       {
         id: 'anthropic',

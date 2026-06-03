@@ -1,4 +1,6 @@
-use chrono::Local;
+use std::collections::HashMap;
+
+use chrono::{Datelike, Duration, Local, NaiveDate};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
@@ -239,6 +241,56 @@ fn upsert_score(conn: &Connection, s: &MasteryScore) -> Result<(), String> {
     Ok(())
 }
 
+/// Monday-anchored ISO week start for a date, formatted `YYYY-MM-DD`.
+/// Pure + deterministic so week bucketing is unit-testable without a clock.
+pub fn week_start(date: NaiveDate) -> NaiveDate {
+    let offset = date.weekday().num_days_from_monday() as i64;
+    date - Duration::days(offset)
+}
+
+/// Average the supplied scores per pillar, returning `(pillar_id, avg, count)`.
+/// Pure — no DB access — so the weekly snapshot math is testable in isolation.
+fn avg_by_pillar(scores: &[MasteryScore]) -> Vec<(String, f32, i32)> {
+    let mut acc: HashMap<String, (f32, i32)> = HashMap::new();
+    for s in scores {
+        let entry = acc.entry(s.pillar_id.clone()).or_insert((0.0, 0));
+        entry.0 += s.score;
+        entry.1 += 1;
+    }
+    let mut out: Vec<(String, f32, i32)> = acc
+        .into_iter()
+        .map(|(pillar, (sum, n))| (pillar, sum / n as f32, n))
+        .collect();
+    // Stable order keeps tests deterministic.
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+/// UPSERT one pillar's weekly average into mastery_snapshots. One row per
+/// (week_start, pillar) — recompute may run many times a week, so we overwrite
+/// the current week and never touch prior weeks (needed for WoW deltas).
+fn upsert_snapshot(
+    conn: &Connection,
+    week_start: &str,
+    pillar_id: &str,
+    avg_score: f32,
+    item_count: i32,
+    captured_at: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO mastery_snapshots
+             (week_start, pillar_id, avg_score, item_count, captured_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(week_start, pillar_id) DO UPDATE SET
+             avg_score = excluded.avg_score,
+             item_count = excluded.item_count,
+             captured_at = excluded.captured_at",
+        rusqlite::params![week_start, pillar_id, avg_score, item_count, captured_at],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Recompute mastery for the supplied curriculum items, persisting each score.
 /// The frontend passes the (itemId, pillarId, topic) triples so curriculum data
 /// is not duplicated in Rust. An optional `pillar` filter narrows the set.
@@ -260,6 +312,15 @@ pub fn recompute_mastery(
         }
         let score = aggregate_item(&conn, &item.pillar_id, &item.item_id, &item.topic, &now)?;
         scores.push(score);
+    }
+
+    // Capture this week's per-pillar average so week-over-week mastery deltas are
+    // derivable later. Upsert keeps prior weeks immutable for the delta math.
+    let ws = week_start(Local::now().date_naive())
+        .format("%Y-%m-%d")
+        .to_string();
+    for (pillar_id, avg, count) in avg_by_pillar(&scores) {
+        upsert_snapshot(&conn, &ws, &pillar_id, avg, count, &now)?;
     }
 
     Ok(scores)
@@ -360,6 +421,14 @@ mod tests {
                 depth_norm REAL,
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (pillar_id, item_id)
+            );
+            CREATE TABLE mastery_snapshots (
+                week_start TEXT NOT NULL,
+                pillar_id TEXT NOT NULL,
+                avg_score REAL NOT NULL,
+                item_count INTEGER NOT NULL,
+                captured_at TEXT NOT NULL,
+                PRIMARY KEY (week_start, pillar_id)
             );",
         )
         .unwrap();
@@ -467,6 +536,75 @@ mod tests {
         let s = aggregate_item(&conn, "llm", "item-q", "Quantization", "2026-01-01").unwrap();
         assert!(s.depth_norm.is_some());
         assert!(s.score > 0.0);
+    }
+
+    fn score(pillar: &str, item: &str, s: f32) -> MasteryScore {
+        MasteryScore {
+            pillar_id: pillar.to_string(),
+            item_id: item.to_string(),
+            score: s,
+            quiz_accuracy: None,
+            ease_norm: None,
+            depth_norm: None,
+            updated_at: "2026-06-03".to_string(),
+        }
+    }
+
+    #[test]
+    fn week_start_anchors_to_monday() {
+        // 2026-06-03 is a Wednesday → week starts Monday 2026-06-01.
+        let wed = NaiveDate::from_ymd_opt(2026, 6, 3).unwrap();
+        assert_eq!(week_start(wed), NaiveDate::from_ymd_opt(2026, 6, 1).unwrap());
+        // Monday maps to itself.
+        let mon = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        assert_eq!(week_start(mon), mon);
+        // Sunday belongs to the week that started the previous Monday.
+        let sun = NaiveDate::from_ymd_opt(2026, 6, 7).unwrap();
+        assert_eq!(week_start(sun), mon);
+        // Next Monday rolls into a new bucket.
+        let next_mon = NaiveDate::from_ymd_opt(2026, 6, 8).unwrap();
+        assert_eq!(week_start(next_mon), next_mon);
+    }
+
+    #[test]
+    fn avg_by_pillar_groups_and_averages() {
+        let scores = vec![
+            score("llm", "a", 80.0),
+            score("llm", "b", 40.0),
+            score("hardware", "c", 30.0),
+        ];
+        let out = avg_by_pillar(&scores);
+        // Sorted by pillar id: hardware then llm.
+        assert_eq!(out[0], ("hardware".to_string(), 30.0, 1));
+        assert_eq!(out[1], ("llm".to_string(), 60.0, 2));
+    }
+
+    #[test]
+    fn avg_by_pillar_empty_is_empty() {
+        assert!(avg_by_pillar(&[]).is_empty());
+    }
+
+    #[test]
+    fn snapshot_upsert_overwrites_same_week() {
+        let conn = setup_db();
+        upsert_snapshot(&conn, "2026-06-01", "llm", 50.0, 4, "t1").unwrap();
+        // Re-run within the same week → overwrite, not append.
+        upsert_snapshot(&conn, "2026-06-01", "llm", 65.0, 4, "t2").unwrap();
+        // A different pillar in the same week is independent.
+        upsert_snapshot(&conn, "2026-06-01", "hardware", 20.0, 2, "t2").unwrap();
+
+        let count: i32 = conn
+            .query_row("SELECT COUNT(*) FROM mastery_snapshots", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 2);
+        let avg: f32 = conn
+            .query_row(
+                "SELECT avg_score FROM mastery_snapshots WHERE pillar_id = 'llm'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(avg, 65.0);
     }
 
     #[test]
