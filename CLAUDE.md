@@ -27,7 +27,7 @@ Rust Backend (Tauri v2 + rusqlite + Tokio)
     ├── lib.rs               → App entry, plugin registration, command registration
     ├── db/mod.rs            → DbState(Mutex<Connection>), schema init, WAL mode
     ├── commands/            → Tauri command handlers (grouped by domain)
-    │   ├── ai.rs            → stream_chat, collect_completion (one-shot), get_providers, model listing, save_provider_config
+    │   ├── ai.rs            → stream_chat, get_providers, model listing, save_provider_config, collect_completion (non-streaming AI for background features)
     │   ├── conversations.rs → CRUD + bulk_import_sync
     │   ├── progress.rs      → log_session, get_progress, get_streak, update_milestone
     │   ├── review.rs        → SM-2 spaced repetition (record_review_attempt, get_due_reviews, get_review_counts)
@@ -35,6 +35,7 @@ Rust Backend (Tauri v2 + rusqlite + Tokio)
     │   ├── activation.rs    → pre-session activation quiz (get_activation_quiz)
     │   ├── gaps.rs          → knowledge-gap detection (get_knowledge_gaps, detect_knowledge_gaps, dismiss_gap, mark_gap_drilled)
     │   ├── depth.rs         → session depth scoring (save/get/list_conversation_depth)
+    │   ├── rebalance.rs     → drift detection + adaptive plan rebalancing (get_pillar_drift, generate/apply/dismiss_plan_adjustment, maybe_generate_due_rebalance, get/set_rebalance_settings)
     │   ├── schedule.rs      → get_today_schedule, schedule_notification
     │   ├── sync_server.rs   → Axum-based local sync server (start/stop/status)
     │   └── voice.rs         → STT model management, transcribe_audio, ElevenLabs TTS
@@ -75,7 +76,7 @@ The `useAI` hook in `src/hooks/useAI.ts` handles event subscriptions and calls t
 ## State Management
 Single Zustand store in `src/store/appStore.ts` with `persist` middleware.
 Persisted keys: `providerConfig`, `voiceConfig`, `sidebarCollapsed`, `activePillar`.
-Ephemeral: all messages, streaming state, conversation list, progress data.
+Ephemeral: all messages, streaming state, conversation list, progress data, `pillarDrift`, `planAdjustments`, `pendingPrompt` (NOT persisted).
 
 ## Database (rusqlite)
 SQLite at `{app_data_dir}/tutor.db`. WAL mode, foreign keys ON.
@@ -88,6 +89,8 @@ SQLite at `{app_data_dir}/tutor.db`. WAL mode, foreign keys ON.
 - **`knowledge_gaps`** — auto-detected gaps (PK `gap_id`; pillar, topic_key, severity, signal_summary, status; UNIQUE pillar+topic_key)
 - **`conversation_depth`** — engagement-depth assessment per conversation (PK `conversation_id` → conversations ON DELETE CASCADE; score 1–5, rationale, dimensions JSON, model, message_count)
 - **`settings`** — key/value store
+- **`plan_adjustments`** — weekly rebalance proposals (week_start UNIQUE, week_number, rationale, adjustments JSON, status proposed/applied/dismissed, applied_at)
+- **`settings`** — key/value store (also holds rebalance settings, e.g. `drift_threshold_days`)
 
 Two DB access patterns coexist:
 - `DbState(Mutex<Connection>)` — shared connection, locked per call (used by most commands)
@@ -111,7 +114,7 @@ Default: `anthropic / claude-sonnet-4-5`.
 
 ## Key Types
 All TypeScript interfaces in `src/data/types.ts`. Match Rust serde structs exactly (camelCase).
-Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`, `MasteryScore`, `ActivationResult`, `KnowledgeGap`, `GapSignalKind`, `DepthScore`, `DepthScoreData`, `ConversationDepth`.
+Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`, `MasteryScore`, `ActivationResult`, `KnowledgeGap`, `GapSignalKind`, `DepthScore`, `DepthScoreData`, `ConversationDepth`, `PillarDrift`, `DriftReport`, `PillarStatus`, `AdjustmentStatus`, `PillarAdjustment`, `PlanAdjustment`, `RebalanceSettings`.
 
 ## Spaced Repetition
 SM-2 algorithm in `src-tauri/src/commands/review.rs`. Quality grades 0–5 (≥3 passes). Failed reviews reset interval to 1 day; ease factor floored at 1.3.
@@ -136,6 +139,15 @@ Rates how deeply a learner engaged in a conversation on a 1–5 rubric (1 = surf
 - `src/hooks/useDepthScore.ts` — `runDepthScore(conversationId, {force?})` is idempotent and concurrency-safe (module-scoped `inFlight` dedupe, skips while `isStreaming`, short-circuits if already scored, swallows errors). `useConversationDepth(id)` reads a single assessment. `TutorChat` triggers scoring on navigate-away/new/switch/unmount and shows a `DepthIndicator` chip in the sidebar.
 - `depth.rs` — `save_conversation_depth` (clamps 1–5, preserves original `created_at` on re-score, bumps the conversation's `updated_at`), `get_conversation_depth`, `list_conversation_depths`. Persists to `conversation_depth`. Has unit tests for clamping, float/string-score tolerance, malformed dimensions, and list ordering.
 - Types: `DepthScore` (1|2|3|4|5), `DepthScoreData`, `ConversationDepth`.
+
+## Drift Detection & Adaptive Rebalancing
+"Drift" = Growth Pillars that have planned hours but no recent activity (older than the drift threshold, default 7 days). Logic lives in `src-tauri/src/commands/rebalance.rs` (per-call `db::get_connection` pattern, like `review.rs`). Pure helpers `compute_drift`, `compute_rebalance`, and `load_applied_adjustments` are unit-tested.
+- **Weekly flow**: `generate_plan_rebalance` builds a `PlanAdjustment` (one per `week_start`, persisted in `plan_adjustments`) — shifting minutes toward behind pillars and trimming ahead ones, with an AI-written rationale via `collect_completion`. The user resolves it with `apply_plan_adjustment(weekStart)` or `dismiss_plan_adjustment(weekStart)`.
+- **Schedule reweighting**: `get_today_schedule(app, date)` applies the single *applied* proposal (via `load_applied_adjustments`) to reweight today's blocks (bounded 15–120 min) and may inject a 30-min catch-up block for the most-behind pillar absent from today.
+- **Tutor handoff**: the `DriftCatchUpCard` "Catch up" action sets the one-shot `pendingPrompt` and navigates to the tutor; `TutorChat` consumes `pendingPrompt` once on mount to seed a catch-up drill.
+- **On launch**: `App.tsx` calls `maybe_generate_due_rebalance` once (idempotent — ensures the Sunday proposal exists).
+- Frontend hooks: `useDrift` (`loadDrift`, auto-loads on mount), `usePlanRebalance` (`loadAdjustments`, `generate`, `apply`, `dismiss`, `maybeGenerateDue`)
+- Components: `DriftCatchUpCard` (Dashboard), `PlanRebalanceCard` (ProgressView — on apply calls `usePlan().loadSchedule()` to reconcile), `RebalanceSettingsSection` in Settings (drift threshold days, notifyOnRebalance, autoApplyRebalance — persisted via `set_rebalance_settings`)
 
 ## Tauri IPC Layer
 `src/lib/tauri.ts` provides `tauriInvoke()` and `tauriListen()` wrappers with browser fallback mocks for dev server testing without full Tauri.

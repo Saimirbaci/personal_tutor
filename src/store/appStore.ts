@@ -1,8 +1,34 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { AiMessage, EffortMasteryMatrix, KnowledgeGap, LearningVelocity, MasteryScore, PillarId, ProgressData, ProviderConfig, VoiceConfig } from '@/data/types';
+import {
+  AiMessage,
+  DriftReport,
+  EffortMasteryMatrix,
+  ForgettingCurveSettings,
+  KnowledgeGap,
+  LearningVelocity,
+  MasteryScore,
+  PillarId,
+  PlanAdjustment,
+  ProgressData,
+  ProviderConfig,
+  ReviewItem,
+  VoiceConfig,
+  WeeklyDigest,
+} from '@/data/types';
 
-export interface ConversationSummary {
+const DEFAULT_FORGETTING_CURVE_SETTINGS: ForgettingCurveSettings = {
+  enabled: true,
+  quietHoursStart: 22,
+  quietHoursEnd: 7,
+  dailyCap: 4,
+  pollMinutes: 30,
+  lookaheadMinutes: 0,
+};
+
+/** A lightweight conversation row used in the sidebar/history list.
+ *  (Distinct from the AI-generated `ConversationSummary` note in data/types.ts.) */
+export interface ConversationListEntry {
   id: string;
   title: string;
   pillar: string | null;
@@ -36,11 +62,29 @@ interface AppState {
 
   // Conversations
   activeConversationId: string | null;
-  conversationList: ConversationSummary[];
+  conversationList: ConversationListEntry[];
+
+  // A prompt queued by another view (e.g. a summary's "Reply" or a drift
+  // catch-up drill) to be sent once the tutor opens. Consumed once.
+  pendingPrompt: string | null;
+  // When true, the queued prompt should open in a brand-new conversation
+  // (e.g. a spaced-review drill) rather than the resumed last one.
+  pendingPromptFresh: boolean;
+
+  // Spaced-review session (ephemeral, never persisted). When the user starts a
+  // batch review, the due items are queued here and drilled ONE AT A TIME in the
+  // tutor — the next item is only sent after the user advances. `reviewCursor`
+  // is the index of the item currently being reviewed. Empty queue = no session.
+  reviewQueue: ReviewItem[];
+  reviewCursor: number;
 
   // Progress
   progress: ProgressData | null;
   streak: number;
+
+  // Weekly digests (ephemeral — loaded from backend, never persisted)
+  weeklyDigests: WeeklyDigest[];
+  selectedDigestWeek: string | null;
 
   // Mastery (ephemeral — recomputable, never persisted)
   masteryByItem: Record<string, number>;
@@ -51,12 +95,15 @@ interface AppState {
   // Learning analytics (ephemeral — raw backend payloads, never persisted)
   learningVelocity: LearningVelocity | null;
   effortMatrix: EffortMasteryMatrix | null;
-
-  // A drill prompt to auto-send when the tutor view next opens (ephemeral)
-  pendingPrompt: string | null;
+  // Drift & rebalancing (ephemeral — loaded from backend, never persisted)
+  pillarDrift: DriftReport | null;
+  planAdjustments: PlanAdjustment[] | null;
 
   // Voice
   voiceConfig: VoiceConfig;
+
+  // Forgetting-curve notifications
+  forgettingCurveSettings: ForgettingCurveSettings;
 
   // UI
   sidebarCollapsed: boolean;
@@ -74,22 +121,30 @@ interface AppState {
   finalizeStream: () => void;
   startStream: () => void;
   setActiveConversation: (id: string | null) => void;
-  setConversationList: (list: ConversationSummary[]) => void;
-  upsertConversation: (summary: ConversationSummary) => void;
+  setConversationList: (list: ConversationListEntry[]) => void;
+  upsertConversation: (summary: ConversationListEntry) => void;
   removeConversation: (id: string) => void;
+  setPendingPrompt: (prompt: string | null, fresh?: boolean) => void;
+  beginReviewSession: (items: ReviewItem[]) => void;
+  advanceReviewSession: () => ReviewItem | null;
+  endReviewSession: () => void;
   setProgress: (p: ProgressData) => void;
   setStreak: (s: number) => void;
+  setWeeklyDigests: (d: WeeklyDigest[]) => void;
+  setSelectedDigestWeek: (weekStart: string | null) => void;
   setMasteryScores: (scores: MasteryScore[]) => void;
   setKnowledgeGaps: (gaps: KnowledgeGap[]) => void;
   setLearningVelocity: (velocity: LearningVelocity | null) => void;
   setEffortMatrix: (matrix: EffortMasteryMatrix | null) => void;
-  setPendingPrompt: (prompt: string | null) => void;
+  setPillarDrift: (d: DriftReport | null) => void;
+  setPlanAdjustments: (a: PlanAdjustment[] | null) => void;
   setProviderConfig: (c: ProviderConfig) => void;
   toggleSidebar: () => void;
   setMobileSidebarOpen: (open: boolean) => void;
   clearMessages: () => void;
   setLogSessionModal: (open: boolean) => void;
   setVoiceConfig: (c: Partial<VoiceConfig>) => void;
+  setForgettingCurveSettings: (c: Partial<ForgettingCurveSettings>) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -113,15 +168,24 @@ export const useAppStore = create<AppState>()(
 
       activeConversationId: null,
       conversationList: [],
+      pendingPrompt: null,
+      pendingPromptFresh: false,
+
+      reviewQueue: [],
+      reviewCursor: 0,
 
       progress: null,
       streak: 0,
-      knowledgeGaps: null,
       learningVelocity: null,
       effortMatrix: null,
-      pendingPrompt: null,
 
+      weeklyDigests: [],
+      selectedDigestWeek: null,
       masteryByItem: {},
+      knowledgeGaps: null,
+
+      pillarDrift: null,
+      planAdjustments: null,
 
       voiceConfig: {
         enabled: false,
@@ -132,6 +196,8 @@ export const useAppStore = create<AppState>()(
         elevenLabsApiKey: '',
         elevenLabsVoiceId: 'EXAVITQu4vr4xnSDxMaL', // "Sarah" — good default
       },
+
+      forgettingCurveSettings: DEFAULT_FORGETTING_CURVE_SETTINGS,
 
       sidebarCollapsed: false,
       mobileSidebarOpen: false,
@@ -211,9 +277,29 @@ export const useAppStore = create<AppState>()(
           activeConversationId:
             state.activeConversationId === id ? null : state.activeConversationId,
         })),
+      setPendingPrompt: (prompt, fresh = false) =>
+        set({ pendingPrompt: prompt, pendingPromptFresh: prompt ? fresh : false }),
+
+      beginReviewSession: (items) => set({ reviewQueue: items, reviewCursor: 0 }),
+      // Advance to the next queued item and return it (null when the queue is
+      // exhausted, leaving the session ended). The caller sends the returned
+      // item's prompt into the tutor.
+      advanceReviewSession: () => {
+        const { reviewQueue, reviewCursor } = get();
+        const next = reviewCursor + 1;
+        if (next >= reviewQueue.length) {
+          set({ reviewQueue: [], reviewCursor: 0 });
+          return null;
+        }
+        set({ reviewCursor: next });
+        return reviewQueue[next];
+      },
+      endReviewSession: () => set({ reviewQueue: [], reviewCursor: 0 }),
 
       setProgress: (p) => set({ progress: p }),
       setStreak: (s) => set({ streak: s }),
+      setWeeklyDigests: (d) => set({ weeklyDigests: d }),
+      setSelectedDigestWeek: (weekStart) => set({ selectedDigestWeek: weekStart }),
       setMasteryScores: (scores) =>
         set(() => ({
           masteryByItem: scores.reduce<Record<string, number>>((acc, s) => {
@@ -224,7 +310,8 @@ export const useAppStore = create<AppState>()(
       setKnowledgeGaps: (gaps) => set({ knowledgeGaps: gaps }),
       setLearningVelocity: (velocity) => set({ learningVelocity: velocity }),
       setEffortMatrix: (matrix) => set({ effortMatrix: matrix }),
-      setPendingPrompt: (prompt) => set({ pendingPrompt: prompt }),
+      setPillarDrift: (d) => set({ pillarDrift: d }),
+      setPlanAdjustments: (a) => set({ planAdjustments: a }),
       setProviderConfig: (c) => set({ providerConfig: c }),
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
       setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
@@ -232,12 +319,17 @@ export const useAppStore = create<AppState>()(
       setLogSessionModal: (open) => set({ logSessionModalOpen: open }),
       setVoiceConfig: (c) =>
         set((state) => ({ voiceConfig: { ...state.voiceConfig, ...c } })),
+      setForgettingCurveSettings: (c) =>
+        set((state) => ({
+          forgettingCurveSettings: { ...state.forgettingCurveSettings, ...c },
+        })),
     }),
     {
       name: 'personal-tutor-store',
       partialize: (state) => ({
         providerConfig: state.providerConfig,
         voiceConfig: state.voiceConfig,
+        forgettingCurveSettings: state.forgettingCurveSettings,
         sidebarCollapsed: state.sidebarCollapsed,
         activePillar: state.activePillar,
         activationQuizEnabled: state.activationQuizEnabled,
@@ -260,16 +352,30 @@ function parseGenUIBlocks(content: string): { text: string; blocks: import('@/da
     matches.push({ full: match[0], type: match[1], data: match[2].trim() });
   }
 
+  // Types whose body is rendered as a raw string (no JSON parse).
+  const rawTypes = new Set(['diagram', 'key-insight']);
+
   for (const m of matches) {
     cleanText = cleanText.replace(m.full, '');
-    let parsedData: unknown = m.data;
 
+    if (rawTypes.has(m.type)) {
+      blocks.push({ type: m.type as import('@/data/types').GenUIBlock['type'], data: m.data });
+      continue;
+    }
+
+    // Structured blocks must contain valid JSON. If the model emitted prose
+    // (e.g. a conversational "what's your answer?") inside the tag, the parse
+    // fails — drop the block rather than handing a string to a renderer that
+    // expects an object (which would crash, e.g. quiz's data.options.map).
+    let parsedData: unknown;
     try {
-      if (m.type !== 'diagram' && m.type !== 'key-insight') {
-        parsedData = JSON.parse(m.data);
-      }
+      parsedData = JSON.parse(m.data);
     } catch {
-      parsedData = m.data;
+      continue;
+    }
+
+    if (!isValidBlockData(m.type, parsedData)) {
+      continue;
     }
 
     blocks.push({
@@ -278,5 +384,32 @@ function parseGenUIBlocks(content: string): { text: string; blocks: import('@/da
     });
   }
 
+  // Strip any orphaned/half-streamed genui tags the matcher couldn't pair up,
+  // so a stray "</genui>" never leaks into the visible message text.
+  cleanText = cleanText.replace(/<\/?genui[^>]*>/g, '');
+
   return { text: cleanText.trim(), blocks };
+}
+
+/** Minimal shape validation so a structurally-wrong block is dropped instead of
+ *  crashing its renderer. Only checks the fields each renderer dereferences. */
+function isValidBlockData(type: string, data: unknown): boolean {
+  if (typeof data !== 'object' || data === null) return false;
+  const d = data as Record<string, unknown>;
+  switch (type) {
+    case 'quiz':
+      return Array.isArray(d.options) && typeof d.question === 'string';
+    case 'flashcard':
+      return typeof d.question === 'string' && typeof d.answer === 'string';
+    case 'code':
+      return typeof d.code === 'string';
+    case 'concept-map':
+      return Array.isArray(d.nodes) && Array.isArray(d.edges);
+    case 'timeline':
+      return Array.isArray(d.events);
+    case 'session-summary':
+      return Array.isArray(d.takeaways) || typeof d.reflection === 'string';
+    default:
+      return true;
+  }
 }

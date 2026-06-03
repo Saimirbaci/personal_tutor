@@ -89,7 +89,15 @@ export interface AiMessage {
 }
 
 export interface GenUIBlock {
-  type: 'diagram' | 'flashcard' | 'quiz' | 'code' | 'concept-map' | 'timeline' | 'key-insight';
+  type:
+    | 'diagram'
+    | 'flashcard'
+    | 'quiz'
+    | 'code'
+    | 'concept-map'
+    | 'timeline'
+    | 'key-insight'
+    | 'session-summary';
   data: unknown;
 }
 
@@ -214,6 +222,165 @@ export interface ReviewCounts {
   total: number;
   due: number;
   dueToday: number;
+}
+
+// ── Drift Detection & Adaptive Rebalancing ─────────────────────────────────────
+
+/** A pillar that has planned hours but hasn't been touched recently. */
+export interface PillarDrift {
+  pillar: PillarId;
+  /** Days since last activity; null when never touched. */
+  daysSinceActivity: number | null;
+  lastActivity: string | null;
+  plannedHours: number;
+  actualHours: number;
+  /** Normalized severity used for ranking (higher = more neglected). */
+  severity: number;
+  suggestion: string;
+}
+
+export interface DriftReport {
+  thresholdDays: number;
+  generatedAt: string;
+  drifted: PillarDrift[];
+}
+
+export type PillarStatus = 'ahead' | 'behind' | 'on_track';
+export type AdjustmentStatus = 'proposed' | 'applied' | 'dismissed';
+
+export interface PillarAdjustment {
+  pillar: PillarId;
+  plannedHours: number;
+  actualHours: number;
+  status: PillarStatus;
+  /** Positive = behind (needs more time), negative = ahead (can trim). */
+  weightDelta: number;
+  recommendedMinutesDelta: number;
+}
+
+export interface PlanAdjustment {
+  weekStart: string;
+  weekNumber: number;
+  generatedAt: string;
+  rationale: string;
+  adjustments: PillarAdjustment[];
+  status: AdjustmentStatus;
+  appliedAt: string | null;
+}
+
+export interface RebalanceSettings {
+  driftThresholdDays: number;
+  notifyOnRebalance: boolean;
+  autoApplyRebalance: boolean;
+}
+
+// ── Forgetting Curve Notifications ──────────────────────────────────────────────
+
+/** A single decay-based reminder produced by `get_forgetting_curve_due`.
+ *  Mirrors the Rust `ForgettingNudge` struct (camelCase). */
+export interface ForgettingNudge {
+  itemId: string;
+  itemType: ReviewItemType;
+  pillar: PillarId | null;
+  content: string;
+  /** Estimated retention in (0, 1] — lower means more forgotten. */
+  retention: number;
+  daysSinceSeen: number;
+  nextDue: string;
+  title: string;
+  body: string;
+}
+
+/** User preferences for forgetting-curve nudges (persisted in Zustand). */
+export interface ForgettingCurveSettings {
+  enabled: boolean;
+  /** Quiet-hours window in local 24h time; no nudges fire inside it. */
+  quietHoursStart: number;
+  quietHoursEnd: number;
+  /** Maximum nudges fired per calendar day. */
+  dailyCap: number;
+  /** How often the app re-checks for newly-decayed items, in minutes. */
+  pollMinutes: number;
+  /** Include items coming due within this many minutes. */
+  lookaheadMinutes: number;
+}
+
+export interface MorningBriefing {
+  date: string;
+  dayName: string;
+  weekNumber: number;
+  firstBlock: ScheduleBlock | null;
+  totalBlocks: number;
+  currentFocus: string;
+  streak: number;
+  reviewCounts: ReviewCounts;
+  headline: string;
+  notificationBody: string;
+}
+
+// ── Post-Session Summaries ──────────────────────────────────────────────────
+
+/** A flashcard/quiz flagged by the summary for spaced repetition. */
+export interface FlaggedReviewItem {
+  type: ReviewItemType;
+  pillar: PillarId | null;
+  question: string;
+  /** Deterministic review id (mirrors buildReviewItemId) once seeded. */
+  reviewItemId: string;
+}
+
+/** Structured note generated at the end of a chat session, attached to a conversation. */
+export interface ConversationSummary {
+  conversationId: string;
+  /** Exactly 3 key takeaways. */
+  takeaways: string[];
+  /** A single open reflection question. */
+  reflection: string;
+  flaggedItems: FlaggedReviewItem[];
+  /** Provider/model that generated the summary, e.g. "anthropic/claude-sonnet-4-5". */
+  model?: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Joined from the conversation row for list rendering (optional). */
+  conversationTitle?: string;
+  conversationPillar?: PillarId | null;
+}
+
+/** The JSON payload the model emits inside a <genui type="session-summary"> block. */
+export type SessionSummaryData = Pick<
+  ConversationSummary,
+  'takeaways' | 'reflection'
+> & {
+  flaggedItems: Array<Omit<FlaggedReviewItem, 'reviewItemId'> & { reviewItemId?: string }>;
+};
+
+// ── Weekly Digest ────────────────────────────────────────────────────────────
+
+/** Computed (non-AI) metrics that ground a weekly digest. Mirrors Rust DigestMetrics. */
+export interface DigestMetrics {
+  totalHours: number;
+  hoursByPillar: Record<string, number>;
+  sessionsCount: number;
+  streak: number;
+  pillarsCovered: string[];
+  /** Weak review items reviewed this week (knowledge gaps). */
+  topGaps: string[];
+  /** Rule-based pillar ids recommended for next week. */
+  recommendedFocus: string[];
+}
+
+/** An auto-generated weekly learning summary. Mirrors Rust WeeklyDigest. */
+export interface WeeklyDigest {
+  /** Monday of the week (YYYY-MM-DD) — the stable key. */
+  weekStart: string;
+  /** Sunday of the week (YYYY-MM-DD). */
+  weekEnd: string;
+  /** Sprint week number (1–12). */
+  weekNumber: number;
+  /** AI-generated markdown report. */
+  content: string;
+  metrics: DigestMetrics;
+  createdAt: string;
 }
 
 // ── Per-Topic Mastery ─────────────────────────────────────────────────────────

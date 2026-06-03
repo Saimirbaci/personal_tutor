@@ -1,4 +1,4 @@
-import { Component, useEffect, type ReactNode } from 'react';
+import { Component, useEffect, useRef, type ReactNode } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -38,9 +38,10 @@ import TutorChat from '@/components/tutor/TutorChat';
 import PillarView from '@/components/pillars/PillarView';
 import ProgressView from '@/components/progress/ProgressView';
 import Settings from '@/components/settings/Settings';
-import ActivationQuiz from '@/components/activation/ActivationQuiz';
 import { useAppStore } from '@/store/appStore';
 import { useProgress } from '@/hooks/useProgress';
+import { usePlanRebalance } from '@/hooks/usePlanRebalance';
+import { useForgettingCurve } from '@/hooks/useForgettingCurve';
 
 const pageVariants = {
   initial: { opacity: 0, y: 8 },
@@ -50,6 +51,9 @@ const pageVariants = {
 
 export default function App() {
   const { loadProgress } = useProgress();
+  const { maybeGenerateDue, loadAdjustments } = usePlanRebalance();
+  // Forgetting-curve nudges: own internal poll, fires only while the app is open.
+  useForgettingCurve();
   const { currentView, activePillar } = useAppStore();
   const navigate = useNavigate();
   const location = useLocation();
@@ -58,14 +62,23 @@ export default function App() {
     loadProgress();
   }, [loadProgress]);
 
+  // On launch, ensure the Sunday rebalance proposal exists (idempotent,
+  // Sunday-gated on the backend), then load proposals into the store.
+  const rebalanceCheckedRef = useRef(false);
+  useEffect(() => {
+    if (rebalanceCheckedRef.current) return;
+    rebalanceCheckedRef.current = true;
+    (async () => {
+      await maybeGenerateDue();
+      await loadAdjustments();
+    })();
+  }, [maybeGenerateDue, loadAdjustments]);
+
   // Sync store navigation with router
   useEffect(() => {
     switch (currentView) {
       case 'dashboard':
         if (location.pathname !== '/') navigate('/');
-        break;
-      case 'activation':
-        if (location.pathname !== '/activation') navigate('/activation');
         break;
       case 'tutor':
         if (location.pathname !== '/tutor') navigate('/tutor');
@@ -102,22 +115,6 @@ export default function App() {
                 className="h-full"
               >
                 <Dashboard />
-              </motion.div>
-            }
-          />
-          <Route
-            path="/activation"
-            element={
-              <motion.div
-                key="activation"
-                variants={pageVariants}
-                initial="initial"
-                animate="animate"
-                exit="exit"
-                transition={{ duration: 0.2 }}
-                className="h-full"
-              >
-                <ActivationQuiz />
               </motion.div>
             }
           />

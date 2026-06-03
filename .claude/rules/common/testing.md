@@ -50,6 +50,16 @@ npm run lint                   # ESLint (if configured)
 - [ ] Streaming works with the new provider
 - [ ] Error message shown when API key is missing/invalid
 
+### After any drift/rebalance change:
+- [ ] Drift detection surfaces drifting pillars on the Dashboard (`DriftCatchUpCard`)
+- [ ] "Catch up" queues a `pendingPrompt` and lands in the tutor with it sent once (one-shot, not re-sent on remount)
+- [ ] Generate produces a `PlanAdjustment` proposal visible in `ProgressView` (`PlanRebalanceCard`)
+- [ ] Apply reweights today's schedule (blocks bounded 15–120 min) and may inject a 30-min catch-up block for the most-behind pillar
+- [ ] Dismiss clears the proposal and leaves the schedule unchanged
+- [ ] Rebalance settings (drift threshold days, notifyOnRebalance, autoApplyRebalance) persist across restart
+- [ ] `maybe_generate_due_rebalance` is idempotent — repeated app launches don't create duplicate proposals for the same week
+- [ ] `rebalance.rs` Rust unit tests (`compute_drift`, `compute_rebalance`) pass via `cargo test`
+
 ## GenUI Parser Tests (Critical)
 The `parseGenUIBlocks` function in `appStore.ts` is core to the learning experience. Always verify:
 - Tags are fully stripped from returned `text`

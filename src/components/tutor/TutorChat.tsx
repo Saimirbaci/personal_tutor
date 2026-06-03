@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { PanelLeft, Plus, Trash2, Pencil, Check, X, MessageSquare } from 'lucide-react';
+import { PanelLeft, Plus, Trash2, Pencil, Check, X, MessageSquare, FileText, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { tauriInvoke } from '@/lib/tauri';
 import { useAppStore } from '@/store/appStore';
 import { useAI } from '@/hooks/useAI';
 import { useConversations } from '@/hooks/useConversations';
+import { runSessionSummary, useConversationSummary } from '@/hooks/useSessionSummary';
 import { useVoice } from '@/hooks/useVoice';
+import SummaryCard from '@/components/SummaryCard';
 import { useMobile } from '@/hooks/useMobile';
 import { runDepthScore } from '@/hooks/useDepthScore';
 import { PILLARS, PLAN } from '@/data/plan';
 import { PillarId, CurriculumItem, ConversationDepth } from '@/data/types';
-import { ConversationSummary } from '@/store/appStore';
-import { tauriInvoke } from '@/lib/tauri';
+import { singleReviewPrompt } from '@/lib/reviewPrompts';
+import { ConversationListEntry } from '@/store/appStore';
 import MessageBubble from './MessageBubble';
 import InputBar from './InputBar';
 import MarkdownContent from './MarkdownContent';
@@ -105,8 +108,8 @@ function relativeDate(isoStr: string): string {
 }
 
 // ── Group conversations by day label ─────────────────────────────────────────
-function groupByDate(list: ConversationSummary[]): { label: string; items: ConversationSummary[] }[] {
-  const groups = new Map<string, ConversationSummary[]>();
+function groupByDate(list: ConversationListEntry[]): { label: string; items: ConversationListEntry[] }[] {
+  const groups = new Map<string, ConversationListEntry[]>();
   for (const c of list) {
     const label = relativeDate(c.updated_at);
     if (!groups.has(label)) groups.set(label, []);
@@ -165,6 +168,13 @@ export default function TutorChat() {
     activeConversationId,
     conversationList,
     setActiveConversation,
+    pendingPrompt,
+    pendingPromptFresh,
+    setPendingPrompt,
+    reviewQueue,
+    reviewCursor,
+    advanceReviewSession,
+    endReviewSession,
   } = useAppStore((s) => ({
     messages: s.messages,
     isStreaming: s.isStreaming,
@@ -173,6 +183,13 @@ export default function TutorChat() {
     activeConversationId: s.activeConversationId,
     conversationList: s.conversationList,
     setActiveConversation: s.setActiveConversation,
+    pendingPrompt: s.pendingPrompt,
+    pendingPromptFresh: s.pendingPromptFresh,
+    setPendingPrompt: s.setPendingPrompt,
+    reviewQueue: s.reviewQueue,
+    reviewCursor: s.reviewCursor,
+    advanceReviewSession: s.advanceReviewSession,
+    endReviewSession: s.endReviewSession,
   }));
 
   const { sendMessage, clearMessages } = useAI();
@@ -235,11 +252,45 @@ export default function TutorChat() {
     };
   }, []);
 
-  // ── On mount: load conversation list and open/create the latest ───────────
+  // Read-only summary for the conversation currently open (shown at top of the thread).
+  const { summary: activeSummary } = useConversationSummary(activeConversationId);
+
+  // Ids of conversations that have a saved summary (for the sidebar badge).
+  const [summarisedIds, setSummarisedIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await tauriInvoke<Array<{ conversationId: string }>>('list_recent_summaries', {
+          limit: 200,
+        });
+        if (!cancelled) setSummarisedIds(new Set(rows.map((r) => r.conversationId)));
+      } catch (err) {
+        console.error('Failed to load summary index:', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSummary, conversationList.length]);
+
+  // Fire-and-forget summary generation for a session that's ending.
+  // runSessionSummary internally short-circuits (existing summary / <4 messages) and dedupes.
+  const summariseSession = useCallback((conversationId: string | null) => {
+    if (!conversationId) return;
+    if (useAppStore.getState().isStreaming) return; // never summarise mid-stream
+    void runSessionSummary(conversationId);
+  }, []);
+
+  // ── On mount: load conversation list and open/create the right thread ──────
   useEffect(() => {
     async function init() {
       const list = await loadConversationList();
-      if (list.length > 0) {
+      // A queued review/drill drill wants a clean thread, not the last chat.
+      if (useAppStore.getState().pendingPromptFresh) {
+        clearMessages();
+        await createConversation(selectedPillar);
+      } else if (list.length > 0) {
         // Resume the most-recent conversation
         const latest = list[0];
         setActiveConversation(latest.id);
@@ -259,6 +310,45 @@ export default function TutorChat() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingContent]);
 
+  // Consume a queued prompt (e.g. a spaced-review drill, a drift catch-up, or a
+  // "Reply" from a summary's reflection). Cleared immediately so it's never
+  // re-sent. A `fresh` prompt arriving while already mounted spins up a new
+  // conversation first so the drill doesn't land in the current thread.
+  const startingFreshRef = useRef(false);
+  useEffect(() => {
+    if (!pendingPrompt || isStreaming || startingFreshRef.current) return;
+    const prompt = pendingPrompt;
+    const fresh = pendingPromptFresh;
+    setPendingPrompt(null);
+
+    if (fresh && activeConversationId && messages.length > 0) {
+      // Already in a populated thread — open a clean one before drilling.
+      startingFreshRef.current = true;
+      (async () => {
+        summariseSession(activeConversationId);
+        clearMessages();
+        await createConversation(selectedPillar);
+        startingFreshRef.current = false;
+        sendMessage(prompt, selectedPillar ?? undefined);
+      })();
+    } else {
+      // Fresh-on-mount is handled by init(); just send into the active thread.
+      sendMessage(prompt, selectedPillar ?? undefined);
+    }
+  }, [
+    pendingPrompt,
+    pendingPromptFresh,
+    isStreaming,
+    activeConversationId,
+    messages.length,
+    sendMessage,
+    selectedPillar,
+    setPendingPrompt,
+    summariseSession,
+    clearMessages,
+    createConversation,
+  ]);
+
   // TTS: auto-speak the last assistant message when streaming finishes
   useEffect(() => {
     if (prevStreamingRef.current && !isStreaming) {
@@ -273,13 +363,22 @@ export default function TutorChat() {
     prevStreamingRef.current = isStreaming;
   }, [isStreaming]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Summarise on navigate-away / unmount ──────────────────────────────────
+  useEffect(() => {
+    return () => {
+      summariseSession(activeConvRef.current);
+    };
+  }, [summariseSession]);
+
   // ── New conversation ──────────────────────────────────────────────────────
   const handleNewConversation = useCallback(async () => {
     // Score the session we're ending before clearing it out.
     scoreConversation(activeConversationId);
+    summariseSession(activeConversationId); // session ending — summarise the old one
+    endReviewSession(); // abandon any in-progress spaced-review drill
     clearMessages();
     await createConversation(selectedPillar);
-  }, [scoreConversation, activeConversationId, clearMessages, createConversation, selectedPillar]);
+  }, [scoreConversation, activeConversationId, clearMessages, createConversation, selectedPillar, summariseSession, endReviewSession]);
 
   // ── Switch to a conversation ──────────────────────────────────────────────
   const handleSelectConversation = useCallback(
@@ -287,12 +386,14 @@ export default function TutorChat() {
       if (id === activeConversationId) return;
       // Score the session we're leaving before switching away.
       scoreConversation(activeConversationId);
+      summariseSession(activeConversationId); // leaving the current session
+      endReviewSession(); // leaving the review thread abandons the drill
       clearMessages();
       setActiveConversation(id);
       const msgs = await loadConversationMessages(id);
       useAppStore.setState({ messages: msgs });
     },
-    [activeConversationId, scoreConversation, clearMessages, setActiveConversation, loadConversationMessages]
+    [activeConversationId, scoreConversation, clearMessages, setActiveConversation, loadConversationMessages, summariseSession, endReviewSession]
   );
 
   // ── Delete ────────────────────────────────────────────────────────────────
@@ -317,6 +418,24 @@ export default function TutorChat() {
   const handleSend = (content: string) => {
     sendMessage(content, selectedPillar ?? undefined);
   };
+
+  // ── Spaced review: advance to the next queued item ────────────────────────
+  // A batch review drills items one at a time. The next item's prompt is sent
+  // into the SAME conversation only after the user clicks "Next question", so
+  // each LLM response stays small and streams smoothly.
+  const inReviewSession = reviewQueue.length > 0;
+  const reviewRemaining = inReviewSession ? reviewQueue.length - reviewCursor - 1 : 0;
+  // Only surface the prompt once the current item's answer has rendered.
+  const lastMessageIsAssistant =
+    messages.length > 0 && messages[messages.length - 1].role === 'assistant';
+  const showReviewControls = inReviewSession && !isStreaming && lastMessageIsAssistant;
+
+  const handleNextReviewItem = useCallback(() => {
+    const next = advanceReviewSession();
+    if (next) {
+      sendMessage(singleReviewPrompt(next), next.pillar ?? undefined);
+    }
+  }, [advanceReviewSession, sendMessage]);
 
   // ── Render ────────────────────────────────────────────────────────────────
   const groups = groupByDate(conversationList);
@@ -366,6 +485,12 @@ export default function TutorChat() {
                         score={depthById.get(conv.id)!.score}
                         rationale={depthById.get(conv.id)!.rationale}
                       />
+                    )}
+                    {summarisedIds.has(conv.id) && (
+                      <span className="inline-flex items-center gap-1 text-[9px] text-[#2E5FA3]/80">
+                        <FileText size={9} />
+                        Summary
+                      </span>
                     )}
                   </div>
                 )}
@@ -573,6 +698,9 @@ export default function TutorChat() {
             </div>
           )}
 
+          {/* Existing session summary — read-only context at the top of the thread */}
+          {activeSummary && messages.length > 0 && <SummaryCard summary={activeSummary} />}
+
           <AnimatePresence initial={false}>
             {messages.map((msg) => (
               <motion.div
@@ -616,6 +744,42 @@ export default function TutorChat() {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* Spaced-review session controls — drill the queue one item at a time */}
+          {showReviewControls && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex flex-col items-center gap-2 pt-2"
+            >
+              <span className="text-[10px] font-semibold text-[#4a5568] uppercase tracking-wider">
+                Review · {reviewCursor + 1} of {reviewQueue.length}
+              </span>
+              {reviewRemaining > 0 ? (
+                <button
+                  onClick={handleNextReviewItem}
+                  className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all hover:bg-[#1a2540]"
+                  style={{ color: '#C9A84C', border: '1px solid #C9A84C40' }}
+                >
+                  Next question
+                  <ArrowRight size={13} />
+                </button>
+              ) : (
+                <div className="flex flex-col items-center gap-2">
+                  <span className="flex items-center gap-1.5 text-xs text-[#C9A84C]">
+                    <CheckCircle2 size={14} />
+                    Review complete — nicely done.
+                  </span>
+                  <button
+                    onClick={endReviewSession}
+                    className="text-[11px] text-[#4a5568] hover:text-[#e2e8f0] px-3 py-1 rounded-lg hover:bg-[#1a2540] transition-all"
+                  >
+                    Finish
+                  </button>
+                </div>
+              )}
+            </motion.div>
           )}
 
           <div ref={messagesEndRef} />

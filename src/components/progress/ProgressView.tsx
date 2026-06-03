@@ -5,9 +5,9 @@ import { PILLARS } from '@/data/plan';
 import { formatHours, formatDateShort } from '@/lib/utils';
 import { PillarId } from '@/data/types';
 import { useAnalytics } from '@/hooks/useAnalytics';
-import NeedsAttention from './NeedsAttention';
 import LearningVelocityCard from './LearningVelocityCard';
 import EffortMasteryMatrix from './EffortMasteryMatrix';
+import PlanRebalanceCard from './PlanRebalanceCard';
 
 export default function ProgressView() {
   const { progress, streak } = useAppStore();
@@ -52,8 +52,14 @@ export default function ProgressView() {
           </div>
         </motion.div>
 
-        {/* Needs attention — auto-detected knowledge gaps */}
-        <NeedsAttention />
+        {/* Weekly plan rebalance proposal */}
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.08 }}
+        >
+          <PlanRebalanceCard />
+        </motion.div>
 
         {/* Learning velocity — pace, WoW mastery delta, completion confidence */}
         <LearningVelocityCard />

@@ -17,10 +17,17 @@ interface QuizProps {
 
 export default function Quiz({ data, pillar }: QuizProps) {
   const [selected, setSelected] = useState<number | null>(null);
+  const { recordAttempt } = useReview();
   const color = pillar ? pillarColor(pillar) : '#2E5FA3';
+
+  // Defensive: a malformed block (e.g. options missing) should render nothing
+  // rather than crash on data.options.map. (All hooks are called above.)
+  if (!data || !Array.isArray(data.options) || data.options.length === 0) {
+    return null;
+  }
+
   const answered = selected !== null;
   const isCorrect = selected === data.correct;
-  const { recordAttempt } = useReview();
 
   const handleSelect = (i: number) => {
     if (answered) return;

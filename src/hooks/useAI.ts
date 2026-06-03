@@ -157,6 +157,11 @@ export function useAI() {
     async (content: string, contextPillar?: PillarId) => {
       if (isStreaming) return;
 
+      // Read the active conversation at call-time, not from the render closure,
+      // so a just-created fresh conversation (e.g. a spaced-review drill) is
+      // targeted correctly rather than the previously-active one.
+      const convId = useAppStore.getState().activeConversationId;
+
       const userMessage: AiMessage = {
         id: crypto.randomUUID(),
         role: 'user',
@@ -167,8 +172,8 @@ export function useAI() {
       addMessage(userMessage);
 
       // Persist user message
-      if (activeConversationId) {
-        persistMessage(activeConversationId, userMessage);
+      if (convId) {
+        persistMessage(convId, userMessage);
       }
 
       startStream();
@@ -186,12 +191,12 @@ export function useAI() {
         finalizeStream();
 
         // Persist the assistant message that finalizeStream just created
-        if (activeConversationId) {
+        if (convId) {
           // finalizeStream() is synchronous — the new message is already in the store
           const latestMessages = useAppStore.getState().messages;
           const assistantMsg = latestMessages[latestMessages.length - 1];
           if (assistantMsg?.role === 'assistant') {
-            persistMessage(activeConversationId, assistantMsg);
+            persistMessage(convId, assistantMsg);
           }
         }
 

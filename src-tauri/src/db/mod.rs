@@ -94,6 +94,46 @@ pub fn init(app: &AppHandle) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_review_items_due
             ON review_items(next_due);
 
+        CREATE TABLE IF NOT EXISTS plan_adjustments (
+            id            TEXT PRIMARY KEY,
+            week_start    TEXT NOT NULL UNIQUE,
+            week_number   INTEGER NOT NULL,
+            generated_at  TEXT NOT NULL,
+            rationale     TEXT NOT NULL,
+            adjustments   TEXT NOT NULL,
+            status        TEXT NOT NULL DEFAULT 'proposed',
+            applied_at    TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_plan_adjustments_week
+            ON plan_adjustments(week_start DESC);
+
+        CREATE TABLE IF NOT EXISTS conversation_summaries (
+            conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+            takeaways       TEXT NOT NULL,
+            reflection      TEXT NOT NULL,
+            flagged_items   TEXT NOT NULL,
+            model           TEXT,
+            created_at      TEXT NOT NULL,
+            updated_at      TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_conv_summary_created
+            ON conversation_summaries(created_at);
+
+        CREATE TABLE IF NOT EXISTS weekly_digests (
+            id          TEXT PRIMARY KEY,
+            week_start  TEXT NOT NULL UNIQUE,
+            week_end    TEXT NOT NULL,
+            week_number INTEGER NOT NULL,
+            content     TEXT NOT NULL,
+            metrics     TEXT NOT NULL,
+            created_at  TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_weekly_digests_week_start
+            ON weekly_digests(week_start DESC);
+
         CREATE TABLE IF NOT EXISTS mastery_scores (
             pillar_id     TEXT NOT NULL,
             item_id       TEXT NOT NULL,
@@ -154,7 +194,42 @@ pub fn init(app: &AppHandle) -> Result<()> {
         ",
     )?;
 
+    run_migrations(&conn)?;
+
     app.manage(DbState(Mutex::new(conn)));
+    Ok(())
+}
+
+/// Idempotent schema migrations for columns that `CREATE TABLE IF NOT EXISTS`
+/// cannot add to a pre-existing table. Each migration must tolerate being
+/// re-run on an already-migrated database.
+fn run_migrations(conn: &Connection) -> Result<()> {
+    add_column_if_missing(
+        conn,
+        "review_items",
+        "last_notified_at",
+        "ALTER TABLE review_items ADD COLUMN last_notified_at TEXT",
+    )?;
+    Ok(())
+}
+
+/// Adds a column only when it is not already present, by inspecting
+/// `PRAGMA table_info`. Avoids relying on swallowing a duplicate-column error.
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    alter_sql: &str,
+) -> Result<()> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let exists = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(|r| r.ok())
+        .any(|name| name == column);
+
+    if !exists {
+        conn.execute(alter_sql, [])?;
+    }
     Ok(())
 }
 

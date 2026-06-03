@@ -61,39 +61,64 @@ pub async fn stream_chat(
     }
 }
 
-/// Run a single non-streaming completion and return the full text.
+/// Runs a single non-streaming completion and returns the full text.
 ///
-/// Unlike `stream_chat`, this collects every token into a `String` and returns it
-/// directly rather than emitting `ai-token`/`ai-done` events. Used by background
-/// classification flows (e.g. session depth scoring) that need a one-shot result
-/// without touching the live chat UI. Provider/API-key resolution stays on the
-/// frontend via `config`, mirroring `stream_chat`.
+/// Internally reuses the streaming provider plumbing — tokens are collected
+/// into a buffer rather than emitted to the UI. Used by background features
+/// (e.g. weekly plan rebalancing) that need an AI rationale without touching
+/// the live chat stream. Bounded by `timeout_secs` so a hung provider can't
+/// block app launch.
+/// `timeout_secs` is optional for backwards compatibility with callers that
+/// don't pass it (e.g. depth scoring); defaults to 45 seconds.
 #[tauri::command]
 pub async fn collect_completion(
     messages: Vec<AiMessage>,
     system: Option<String>,
     config: ProviderConfig,
+    timeout_secs: Option<u64>,
 ) -> Result<String, String> {
     let provider = make_provider(config);
-
     let (tx, mut rx) = mpsc::channel::<String>(256);
 
     let collector = tokio::spawn(async move {
-        let mut buf = String::new();
+        let mut buffer = String::new();
         while let Some(token) = rx.recv().await {
-            buf.push_str(&token);
+            buffer.push_str(&token);
         }
-        buf
+        buffer
     });
 
-    provider
-        .stream_completion(messages, system, tx)
+    let completion = provider.stream_completion(messages, system, tx);
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(timeout_secs.unwrap_or(45)),
+        completion,
+    )
         .await
+        .map_err(|_| "AI request timed out".to_string())?
         .map_err(|e| e.to_string())?;
 
+    // `tx` was moved into `stream_completion` and dropped on return, so the
+    // collector's channel is now closed and the task will finish.
     collector.await.map_err(|e| e.to_string())
 }
 
+/// One-shot, NON-streaming completion used for background tasks (e.g. session
+/// summaries). Never emits `ai-token`/`ai-done`/`ai-error`, so it can run
+/// concurrently with the live chat UI. Bounded by a 45s timeout.
+#[tauri::command]
+pub async fn summarize_conversation(
+    transcript: String,
+    system: Option<String>,
+    config: ProviderConfig,
+) -> Result<String, String> {
+    let messages = vec![AiMessage {
+        role: "user".to_string(),
+        content: transcript,
+    }];
+
+    collect_completion(messages, system, config, Some(45)).await
+}
 #[tauri::command]
 pub fn get_providers() -> Vec<ProviderInfo> {
     vec![

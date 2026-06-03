@@ -46,6 +46,18 @@ pub async fn get_conversation_messages(
 }
 ```
 
+### Per-Call Connection Pattern (review.rs / rebalance.rs)
+Some command files skip the shared `DbState` mutex and open a fresh connection per call via `db::get_connection(&app)`. Safe under WAL for short reads/writes; used by `review.rs` and `commands/rebalance.rs`. Prefer this for synchronous `pub fn` handlers that don't need the shared connection.
+```rust
+#[tauri::command]
+pub fn get_pillar_drift(app: AppHandle, threshold_days: Option<i32>) -> Result<DriftReport, String> {
+    let conn = db::get_connection(&app).map_err(|e| e.to_string())?;
+    // short read/write, no shared mutex
+    // ...
+}
+```
+Keep pure logic (e.g. `compute_drift`, `compute_rebalance`, `load_applied_adjustments`) in testable helpers with a `#[cfg(test)]` module.
+
 ### AI Streaming Pattern
 ```rust
 // From commands/ai.rs — always emit ai-done or ai-error
@@ -79,6 +91,9 @@ pub async fn stream_chat(
 2. Match on provider name in `stream_chat` command
 3. Provider must emit `ai-token` events for each text chunk, then `ai-done`
 4. Use `reqwest` with `stream` feature — already in Cargo.toml
+
+### Background (Non-Streaming) AI
+Background features that need an AI rationale without touching the live chat stream use `commands/ai.rs::collect_completion(messages, system, config, timeout_secs) -> Result<String, String>`. It reuses the streaming provider plumbing but buffers tokens via an mpsc channel instead of emitting them to the UI, bounded by a timeout. Used by the rebalance flow (`generate_plan_rebalance`, `maybe_generate_due_rebalance`) — never wire a second AI code path for these.
 
 ### Voice Commands (Desktop Only)
 ```rust
@@ -128,6 +143,10 @@ conn.execute_batch("
 ")?;
 ```
 No migration framework — the `IF NOT EXISTS` guards make it safe to re-run.
+
+The drift/rebalance feature added the `plan_adjustments` table (id, week_start UNIQUE, week_number, generated_at, rationale, adjustments JSON, status DEFAULT 'proposed', applied_at) plus `idx_plan_adjustments_week`. Rebalance settings (e.g. `drift_threshold_days`) persist in the existing `settings` key/value table rather than a dedicated table.
+
+Note: `commands/schedule.rs::get_today_schedule` now takes `app: AppHandle` as its first param so it can apply the single applied rebalance proposal (via `load_applied_adjustments`) to reweight today's blocks (bounded 15–120 min) and optionally inject a catch-up block.
 
 ## Implementation Checklist for New Commands
 - [ ] Handler in `commands/<domain>.rs`
