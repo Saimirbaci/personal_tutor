@@ -4,7 +4,7 @@ pub mod db;
 
 use commands::{
     activation, ai as ai_cmd, analytics, conversations as conv_cmd, depth, digest as digest_cmd,
-    gaps, mastery, progress, rebalance, review, schedule, summaries as summary_cmd,
+    gaps, listen, mastery, progress, rebalance, review, schedule, summaries as summary_cmd,
     sync_server as sync_cmd, voice as voice_cmd,
 };
 use sync_cmd::SyncServerHandle;
@@ -88,6 +88,7 @@ pub fn run() {
             voice_cmd::transcribe_audio,
             voice_cmd::tts_elevenlabs,
             voice_cmd::get_elevenlabs_voices,
+            listen::generate_audio_lesson,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

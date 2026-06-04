@@ -47,7 +47,7 @@ pub async fn get_conversation_messages(
 ```
 
 ### Per-Call Connection Pattern (review.rs / rebalance.rs)
-Some command files skip the shared `DbState` mutex and open a fresh connection per call via `db::get_connection(&app)`. Safe under WAL for short reads/writes; used by `review.rs` and `commands/rebalance.rs`. Prefer this for synchronous `pub fn` handlers that don't need the shared connection.
+Some command files skip the shared `DbState` mutex and open a fresh connection per call via `db::get_connection(&app)`. Safe under WAL for short reads/writes; used by `review.rs`, `commands/rebalance.rs`, `commands/mastery.rs`, and `commands/listen.rs`. Prefer this for synchronous `pub fn` handlers that don't need the shared connection.
 ```rust
 #[tauri::command]
 pub fn get_pillar_drift(app: AppHandle, threshold_days: Option<i32>) -> Result<DriftReport, String> {
