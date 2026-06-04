@@ -37,10 +37,23 @@ tauriInvoke('tts_elevenlabs', { text, voiceId })
        │
        ▼ (Rust)
 commands/voice.rs::tts_elevenlabs()
-  POST https://api.elevenlabs.io/v1/text-to-speech/{voiceId}
+  → wraps synthesize_tts(text, api_key, voice_id) -> Vec<u8>
+  POST https://api.elevenlabs.io/v1/text-to-speech/{voiceId}/stream
        │
        ▼
-Returns Vec<u8> (audio bytes) → decoded + played in browser
+Returns base64 MP3 string → decoded + played in browser
+
+Listen Mode (podcast-style audio lessons)
+       │
+tauriInvoke('generate_audio_lesson', { pillar, topic, config, apiKey, voiceId })
+       │
+       ▼ (Rust)
+commands/listen.rs::generate_audio_lesson()
+  → script via collect_completion → chunk_script
+  → synthesize_tts() per chunk (reused from voice.rs)
+       │
+       ▼
+Returns AudioLesson { ..., audioBase64 } → played in AudioLessonPlayer
 ```
 
 ---
@@ -394,6 +407,71 @@ if !response.status().is_success() {
 let bytes = response.bytes().await.map_err(|e| e.to_string())?;
 Ok(bytes.to_vec())
 ```
+
+### Shared `synthesize_tts` helper
+
+TTS synthesis is factored into a UI-agnostic helper so multiple features can reuse it:
+
+```rust
+// src-tauri/src/commands/voice.rs
+/// Synthesizes a single chunk of text to MP3 bytes via the ElevenLabs streaming
+/// endpoint. UI-agnostic — returns raw bytes.
+pub async fn synthesize_tts(
+    text: &str,
+    api_key: &str,
+    voice_id: &str,
+) -> Result<Vec<u8>, String> { ... }
+```
+
+- Hits `POST .../v1/text-to-speech/{voiceId}/stream` (model `eleven_turbo_v2_5`) and returns raw `Vec<u8>` MP3 bytes.
+- Guards against a missing key (`"ElevenLabs API key not set. Add it in Settings → Voice."`).
+- The `tts_elevenlabs` command now wraps `synthesize_tts` and base64-encodes the bytes (returns `String`).
+- **Listen Mode** (`commands/listen.rs`) reuses `synthesize_tts` for multi-chunk narration.
+
+---
+
+## Listen Mode — Podcast-Style Audio Lessons
+
+`commands/listen.rs::generate_audio_lesson` generates a fresh 5–10 min single-narrator (solo podcast) script each call, grounded in the learner's current progress/mastery/knowledge-gaps, then synthesizes it to MP3 via ElevenLabs and returns base64.
+
+```rust
+// src-tauri/src/commands/listen.rs
+#[tauri::command]
+pub async fn generate_audio_lesson(
+    app: AppHandle,
+    pillar: String,
+    topic: String,
+    config: ProviderConfig,
+    api_key: String,
+    voice_id: String,
+) -> Result<AudioLesson, String> { ... }
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioLesson {
+    pub pillar: String,
+    pub topic: String,
+    pub script: String,             // clean spoken prose (no markdown/genui)
+    pub audio_base64: String,       // base64 MP3 of full multi-chunk narration
+    pub duration_estimate_secs: u32,
+    pub segment_count: u32,
+}
+```
+
+**Flow** (per-call `db::get_connection` pattern, like `review.rs`/`rebalance.rs`/`mastery.rs`):
+1. `gather_context` — brief synchronous DB read: sessions `SUM(hours)` + 3 recent non-empty notes, `mastery_scores` `AVG(score)`, up to 4 open knowledge-gap labels by severity.
+2. `build_lesson_context` (pure) → `collect_completion` writes the script (`LESSON_SYSTEM_PROMPT`, 120s timeout).
+3. `clean_script` (pure) strips markdown/genui/code-fences to clean spoken prose.
+4. `chunk_script` (pure) splits under `MAX_CHUNK_CHARS = 2400` on sentence/word boundaries, never splitting a word.
+5. `synthesize_tts` each chunk → concatenate MP3 bytes → base64.
+
+Emits an `audio-lesson-progress` event with `{ stage, current, total }` so the UI shows generation progress. Pure helpers `build_lesson_context`, `clean_script`, `chunk_script`, and `estimate_duration_secs` are unit-tested in the same file.
+
+**Frontend**:
+- Types in `src/data/types.ts`: `AudioLesson { pillar: PillarId; topic; script; audioBase64; durationEstimateSecs; segmentCount }` and `AudioLessonProgress { stage; current; total }`.
+- Hook `src/hooks/useListenMode.ts` returns `{ generate(pillar, topic), isGenerating, lesson, audioUrl, progress, error, reset }`. Calls `generate_audio_lesson` with `config` (providerConfig) + `apiKey`/`voiceId` from `voiceConfig` (`elevenLabsApiKey`, `elevenLabsVoiceId`), subscribes to `audio-lesson-progress`, decodes base64 → Blob → object URL, and revokes the URL on replace/unmount (`urlRef` + cleanup). Guards against a missing ElevenLabs key.
+- Component `src/components/dashboard/AudioLessonPlayer.tsx` auto-fires `generate` on open, shows live progress (writing script / synthesizing N/total), a native `<audio controls autoPlay>`, duration + segment count, and graceful errors.
+- `src/components/dashboard/TodayCard.tsx` adds a "Listen" button (Headphones icon) next to "Start" on each schedule block, opening an inline `AudioLessonPlayer` for that block's pillar/topic.
 
 ---
 
