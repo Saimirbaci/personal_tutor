@@ -3,7 +3,10 @@ import { Send } from 'lucide-react';
 import { PillarId } from '@/data/types';
 import { PILLARS } from '@/data/plan';
 import { useAppStore } from '@/store/appStore';
+import { useSourceImport } from '@/hooks/useSourceImport';
+import { detectUrl, buildTeachPrompt } from '@/lib/sourceImport';
 import VoiceButton from './VoiceButton';
+import SourceImportChip from './SourceImportChip';
 
 interface InputBarProps {
   onSend: (content: string) => void;
@@ -16,6 +19,23 @@ export default function InputBar({ onSend, disabled, pillar }: InputBarProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pillarData = pillar ? PILLARS.find((p) => p.id === pillar) : null;
   const { voiceConfig } = useAppStore();
+  const { importUrl, isImporting, error: importError } = useSourceImport();
+
+  // A detected URL surfaces the "Teach from this" CTA (suppressed while busy).
+  const detectedUrl = !disabled ? detectUrl(value) : null;
+
+  // Fetch the source, then seed a pillar-aware teaching prompt through onSend.
+  const handleTeachFromUrl = useCallback(async () => {
+    if (!detectedUrl || disabled || isImporting) return;
+    const summary = await importUrl(detectedUrl);
+    if (!summary) return; // error surfaces on the chip
+    const pillarName = pillar ? PILLARS.find((p) => p.id === pillar)?.name ?? null : null;
+    onSend(buildTeachPrompt(summary, pillarName));
+    setValue('');
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+  }, [detectedUrl, disabled, isImporting, importUrl, pillar, onSend]);
 
   // When the voice button delivers a transcript, fill the textarea (and optionally auto-send)
   const handleTranscript = useCallback((text: string) => {
@@ -54,6 +74,15 @@ export default function InputBar({ onSend, disabled, pillar }: InputBarProps) {
 
   return (
     <div className="flex-shrink-0 px-3 md:px-6 py-3 md:py-4 border-t border-[#1a2540] bg-[#080d1a]">
+      {detectedUrl && (
+        <SourceImportChip
+          url={detectedUrl}
+          isImporting={isImporting}
+          error={importError}
+          onClick={handleTeachFromUrl}
+          color={pillarData?.color}
+        />
+      )}
       <div className="flex items-end gap-3 max-w-4xl mx-auto">
         {/* Pillar chip */}
         {pillarData && (

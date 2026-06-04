@@ -1,6 +1,6 @@
 ---
 name: personal-tutor-frontend
-description: "Deep knowledge of the Personal Tutor React/TypeScript frontend. Use for: Zustand store changes, new React components, hooks, Tauri IPC wiring, styling, or any src/ work. Trigger when the user mentions appStore, useAI, tauriInvoke, components/, views/, hooks/, types.ts, Tailwind, Framer Motion, or any frontend file."
+description: "Deep knowledge of the Personal Tutor React/TypeScript frontend. Use for: Zustand store changes, new React components, hooks, Tauri IPC wiring, styling, URL/paper import, or any src/ work. Trigger when the user mentions appStore, useAI, tauriInvoke, components/, views/, hooks/, types.ts, useSourceImport, SourceImportChip, sourceImport.ts, SourceSummary, detectUrl, buildTeachPrompt, source import / URL import, Tailwind, Framer Motion, or any frontend file."
 ---
 
 # Personal Tutor — Frontend Deep Dive
@@ -139,7 +139,9 @@ export function useProgress() {
 }
 ```
 
-Existing hooks: `useAI`, `useVoice`, `useProgress` — extend these before creating new ones.
+Existing hooks: `useAI`, `useVoice`, `useProgress`, `useSourceImport` — extend these before creating new ones.
+
+**URL / Paper Import wiring**: `useSourceImport()` → `{ importUrl(url, generateBrief?), isImporting, error }` calls `tauriInvoke('fetch_and_summarize_url')`, threads `providerConfig`, and **swallows errors into `error` state (returns `null` on failure)** — a failed/invalid URL must never crash the caller. Pure helpers live in `src/lib/sourceImport.ts`: `detectUrl(text)` (first http(s) URL, strips trailing punctuation) and `buildTeachPrompt(summary, pillarName)` (composes a pillar-aware prompt that asks for genui flashcard+quiz blocks so they flow through the existing `parseGenUIBlocks`/spaced-repetition pipeline). UI: `SourceImportChip` ("Teach from this" CTA above the input, shown when `InputBar` detects a URL); on click it imports the source and seeds `buildTeachPrompt` via `onSend`.
 
 **Socratic Mode wiring**: `useAI.sendMessage` resolves the active pillar, looks up `socraticModeByPillar[socraticKey(pillar)]` (where `socraticKey` from `src/lib/utils.ts` maps `null` to `'__global__'`), and passes the flag to `buildContextualSystemPrompt` which appends `SOCRATIC_MODIFIER` when true.
 
@@ -172,6 +174,18 @@ interface ProviderConfig {
   apiKey?: string;
   model: string;
   baseUrl?: string;
+}
+
+// Result of URL / paper import (mirrors Rust SourceSummary, camelCase)
+interface SourceSummary {
+  url: string;
+  title: string;
+  byline?: string;
+  excerpt: string;
+  content: string;
+  wordCount: number;
+  truncated: boolean;
+  teachingBrief?: string;
 }
 ```
 
