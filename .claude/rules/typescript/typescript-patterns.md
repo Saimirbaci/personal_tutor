@@ -47,6 +47,7 @@ useEffect(() => {
 - Drift: `useDrift` — `loadDrift(thresholdDays?)` calls `get_pillar_drift`, stores the `DriftReport` (auto-loads on mount)
 - Rebalance: `usePlanRebalance` — `loadAdjustments`, `generate`, `apply(weekStart)`, `dismiss(weekStart)`, `maybeGenerateDue` wrap the plan-rebalance commands
 - Forgetting curve: `useForgettingCurve` — in-app poll that fires OS nudges (quiet-hours + daily-cap gated); `useForgettingNudgePreview` is a read-only fetch that must NOT call `mark_review_notified`
+- Source import: `useSourceImport` — `importUrl(url, generateBrief?)` calls `fetch_and_summarize_url` (threads `providerConfig`), exposes `isImporting`/`error`, swallows failures into `error` state and returns `null` (never throws); pure URL/prompt helpers (`detectUrl`, `buildTeachPrompt`) live in `src/lib/sourceImport.ts`
 - Background polls/timers must guard against React StrictMode double-mount (e.g. a `startedRef`) and clear their interval on cleanup
 - Never call `tauriInvoke` directly inside React components
 

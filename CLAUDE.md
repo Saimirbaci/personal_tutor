@@ -37,6 +37,7 @@ Rust Backend (Tauri v2 + rusqlite + Tokio)
     │   ├── depth.rs         → session depth scoring (save/get/list_conversation_depth)
     │   ├── rebalance.rs     → drift detection + adaptive plan rebalancing (get_pillar_drift, generate/apply/dismiss_plan_adjustment, maybe_generate_due_rebalance, get/set_rebalance_settings)
     │   ├── schedule.rs      → get_today_schedule, schedule_notification
+    │   ├── source.rs        → URL / paper import (fetch_and_summarize_url) — network/parse only, no DB; SSRF-guarded fetch + scraper HTML extraction + optional collect_completion teaching brief
     │   ├── sync_server.rs   → Axum-based local sync server (start/stop/status)
     │   └── voice.rs         → STT model management, transcribe_audio, ElevenLabs TTS
     └── ai/                  → LLM provider implementations
@@ -102,7 +103,9 @@ SQLite at `{app_data_dir}/tutor.db`. WAL mode, foreign keys ON.
 
 Two DB access patterns coexist:
 - `DbState(Mutex<Connection>)` — shared connection, locked per call (used by most commands)
-- `db::get_connection(&app)` — opens a fresh `rusqlite::Connection` per call (used by `review.rs` and all newer feature commands: `mastery.rs`, `activation.rs`, `gaps.rs`, `depth.rs`); safe under WAL but bypasses the shared mutex. Preferred for synchronous `#[tauri::command] pub fn` handlers that don't share state.
+- `db::get_connection(&app)` — opens a fresh `rusqlite::Connection` per call (used by `review.rs` and most newer feature commands: `mastery.rs`, `activation.rs`, `gaps.rs`, `depth.rs`); safe under WAL but bypasses the shared mutex. Preferred for synchronous `#[tauri::command] pub fn` handlers that don't share state.
+
+Not every command touches the database: `source.rs` (`fetch_and_summarize_url`) is a pure network/parse command and uses **neither** access pattern — it has no `DbState`, no `get_connection`, and no SQL.
 
 ## Sync Server
 Axum HTTP server on a local port (start/stop via Tauri commands). Used to sync conversations from mobile/web to desktop. `SyncServerHandle(Mutex<Option<...>>)` managed as Tauri app state.
@@ -122,7 +125,7 @@ Default: `anthropic / claude-sonnet-4-5`.
 
 ## Key Types
 All TypeScript interfaces in `src/data/types.ts`. Match Rust serde structs exactly (camelCase).
-Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`, `MasteryScore`, `ActivationResult`, `KnowledgeGap`, `GapSignalKind`, `DepthScore`, `DepthScoreData`, `ConversationDepth`, `PillarDrift`, `DriftReport`, `PillarStatus`, `AdjustmentStatus`, `PillarAdjustment`, `PlanAdjustment`, `RebalanceSettings`.
+Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`, `MasteryScore`, `ActivationResult`, `KnowledgeGap`, `GapSignalKind`, `DepthScore`, `DepthScoreData`, `ConversationDepth`, `PillarDrift`, `DriftReport`, `PillarStatus`, `AdjustmentStatus`, `PillarAdjustment`, `PlanAdjustment`, `RebalanceSettings`, `SourceSummary`, `FetchSourceRequest`.
 
 ## Spaced Repetition
 SM-2 algorithm in `src-tauri/src/commands/review.rs`. Quality grades 0–5 (≥3 passes). Failed reviews reset interval to 1 day; ease factor floored at 1.3.
@@ -156,6 +159,16 @@ Rates how deeply a learner engaged in a conversation on a 1–5 rubric (1 = surf
 - **On launch**: `App.tsx` calls `maybe_generate_due_rebalance` once (idempotent — ensures the Sunday proposal exists).
 - Frontend hooks: `useDrift` (`loadDrift`, auto-loads on mount), `usePlanRebalance` (`loadAdjustments`, `generate`, `apply`, `dismiss`, `maybeGenerateDue`)
 - Components: `DriftCatchUpCard` (Dashboard), `PlanRebalanceCard` (ProgressView — on apply calls `usePlan().loadSchedule()` to reconcile), `RebalanceSettingsSection` in Settings (drift threshold days, notifyOnRebalance, autoApplyRebalance — persisted via `set_rebalance_settings`)
+
+## URL / Paper Import (Teach-From-Source)
+Lets the learner paste an article or research-paper URL and have the tutor teach from it. The import is a **network/parse-only** flow — `source.rs` uses no database (neither `DbState` nor `db::get_connection`).
+- `source.rs::fetch_and_summarize_url(request: FetchSourceRequest) -> Result<SourceSummary, String>` — validates the URL, fetches it (reqwest, 30s timeout, browser UA), caps the body at `MAX_BODY_BYTES` (5 MB) via streamed `read_capped`, extracts readable text, truncates to `MAX_CONTENT_CHARS` (12 000 chars), and optionally drafts an AI teaching brief. Registered in `lib.rs` invoke_handler; `pub mod source` in `commands/mod.rs`. New deps: `scraper = "0.20"`, `url = "2"`.
+- **SSRF guard**: `validate_public_url(raw)` allows only http/https and rejects localhost / `.local` / `.localhost` and private/loopback/link-local/unspecified IPv4+IPv6 (incl. `169.254.169.254` metadata and `[::1]`). Always validate before fetching.
+- **Pure, unit-tested helpers**: `extract_readable(html, base)` (scraper-based title/byline/content — prefers og:title, prefers `article`/`main`/`[role=main]` containers, strips `nav`/`footer`/`header`/`aside`/`script`/`style` boilerplate, keeps leaf blocks), `truncate_content` (returns `(text, truncated)`), `make_excerpt` (280-char preview). `extract_readable` runs in `spawn_blocking` because scraper's `Html` is not `Send`. `source.rs` has a `#[cfg(test)] mod tests` with 8 unit tests.
+- **AI brief is best-effort**: `generate_teaching_brief` reuses `collect_completion` and is called with `.ok()` — a missing API key or provider error never fails the import (the teaching flow works from `content` alone).
+- **Frontend**: type `SourceSummary` ({ url, title, byline?, excerpt, content, wordCount, truncated, teachingBrief? }) in `src/data/types.ts` mirrors the Rust serde camelCase. Hook `src/hooks/useSourceImport.ts` → `useSourceImport()` returns `{ importUrl(url, generateBrief?), isImporting, error }`, threads `providerConfig`, swallows errors (returns `null` on failure). Pure helpers in `src/lib/sourceImport.ts`: `detectUrl(text)` (first http(s) URL, strips trailing punctuation) and `buildTeachPrompt(summary, pillarName)` (composes a pillar-aware teaching prompt that requests `genui` flashcard + quiz blocks).
+- **Pipeline reuse**: `buildTeachPrompt` deliberately asks for GenUI flashcard/quiz blocks so the generated content flows through the existing `parseGenUIBlocks()`/`finalizeStream()` and spaced-repetition pipeline — no new rendering or review path.
+- **UI**: `SourceImportChip.tsx` ("Teach from this" CTA) appears above the input when `InputBar.tsx` detects a URL; clicking it imports the source and seeds `buildTeachPrompt` via `onSend`.
 
 ## Tauri IPC Layer
 `src/lib/tauri.ts` provides `tauriInvoke()` and `tauriListen()` wrappers with browser fallback mocks for dev server testing without full Tauri.

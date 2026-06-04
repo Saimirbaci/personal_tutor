@@ -5,6 +5,7 @@
 - Never block the runtime: no `std::thread::sleep()` — use `tokio::time::sleep()`
 - Never use `std::fs` in async contexts — use `tokio::fs` or `spawn_blocking`
 - Exception: rusqlite operations are synchronous — always run them in `spawn_blocking` or hold the `Mutex<Connection>` briefly and release before any await
+- Non-`Send` parsers must run in `spawn_blocking`: `scraper::Html` is not `Send`, so all HTML extraction (`commands/source.rs::extract_readable`) runs inside `spawn_blocking` — never hold an `Html` across an `.await`
 
 ## Tauri Command Pattern
 ```rust
@@ -119,6 +120,27 @@ pub trait AiProvider: Send + Sync {
 }
 ```
 All providers implement this trait and stay UI-agnostic (channel in, tokens out). The command layer adapts the channel to events or a collected string. New providers go in `src-tauri/src/ai/`.
+
+## Network Commands (no DB)
+Not every command touches the database. `commands/source.rs::fetch_and_summarize_url` is a pure network/parse command — it takes neither `DbState` nor `db::get_connection`, just fetches + parses + (optionally) calls `collect_completion`.
+- Validate untrusted URLs before fetching (see security.md "Outbound URL Fetching (SSRF)" — `validate_public_url`).
+- Cap untrusted response bodies with a streamed read, not an unbounded `.bytes().await`:
+
+```rust
+// read_capped: stop reading once MAX_BODY_BYTES is exceeded
+let mut stream = resp.bytes_stream();
+let mut buf = Vec::new();
+while let Some(chunk) = stream.next().await {
+    let chunk = chunk.map_err(|e| e.to_string())?;
+    if buf.len() + chunk.len() > MAX_BODY_BYTES {
+        return Err("Source too large to import.".into());
+    }
+    buf.extend_from_slice(&chunk);
+}
+```
+
+- Keep the pure-helper testability pattern: `extract_readable`, `validate_public_url`, `truncate_content`, and `make_excerpt` are plain functions unit-tested without `AppHandle` or network I/O.
+- Optional AI enrichment (the teaching brief) is best-effort via `collect_completion(...).ok()` — a missing API key must never fail the import.
 
 ## reqwest Usage
 - Use `reqwest::Client` with `stream` feature (already in Cargo.toml)

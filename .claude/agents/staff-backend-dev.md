@@ -58,6 +58,9 @@ pub fn get_pillar_drift(app: AppHandle, threshold_days: Option<i32>) -> Result<D
 ```
 Keep pure logic (e.g. `compute_drift`, `compute_rebalance`, `load_applied_adjustments`) in testable helpers with a `#[cfg(test)]` module.
 
+### Network / Parse Commands (no DB)
+Some commands touch neither `DbState` nor `db::get_connection` — they do network I/O and parsing only. `commands/source.rs::fetch_and_summarize_url` is the reference: it fetches a URL with reqwest (timeout + browser UA, body capped via streamed `read_capped`), then extracts readable text with the `scraper` crate inside `spawn_blocking` (scraper's `Html` is not `Send`). Keep SSRF/parse logic in pure, unit-tested helpers (`validate_public_url`, `extract_readable`, `truncate_content`, `make_excerpt`) and `#[tauri::command] pub async fn` stays thin. Always run an SSRF guard before fetching any frontend-supplied URL.
+
 ### AI Streaming Pattern
 ```rust
 // From commands/ai.rs — always emit ai-done or ai-error

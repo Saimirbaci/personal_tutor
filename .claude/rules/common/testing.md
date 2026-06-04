@@ -60,6 +60,18 @@ npm run lint                   # ESLint (if configured)
 - [ ] `maybe_generate_due_rebalance` is idempotent — repeated app launches don't create duplicate proposals for the same week
 - [ ] `rebalance.rs` Rust unit tests (`compute_drift`, `compute_rebalance`) pass via `cargo test`
 
+### After any URL / paper-import change:
+- [ ] Valid public article URL imports: title, excerpt, and content populate `SourceSummary`
+- [ ] Private/loopback/link-local URLs are rejected (`localhost`, `127.0.0.1`, `[::1]`, `169.254.x`, `*.local`) — no fetch attempted
+- [ ] Non-http(s) schemes (`file:`, `ftp:`, `data:`) are rejected
+- [ ] Oversized body (>5MB) is capped — no memory blowup, graceful error
+- [ ] Non-HTML / PDF / binary URL fails gracefully with a generic user-facing message (no raw fetch/parse error surfaced)
+- [ ] `truncated` flag is set when content exceeds `MAX_CONTENT_CHARS` (12000)
+- [ ] Import with missing API key still succeeds — `teachingBrief` simply absent (best-effort)
+- [ ] `SourceImportChip` appears only when `detectUrl` finds a URL in the input
+- [ ] "Teach from this" seeds `buildTeachPrompt` and the resulting GenUI flashcard/quiz blocks render and feed spaced repetition
+- [ ] `source.rs` unit tests (extraction, boilerplate stripping, title/og:title fallback, URL scheme/host validation, private-host rejection, truncation, excerpt bounding) pass via `cargo test`
+
 ## GenUI Parser Tests (Critical)
 The `parseGenUIBlocks` function in `appStore.ts` is core to the learning experience. Always verify:
 - Tags are fully stripped from returned `text`
