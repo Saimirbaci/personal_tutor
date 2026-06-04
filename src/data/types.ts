@@ -200,6 +200,30 @@ export interface ElevenLabsVoice {
   category: string;
 }
 
+// ── Listen Mode (Audio Lessons) ────────────────────────────────────────────────
+
+/** A generated podcast-style audio lesson. Mirrors the Rust `AudioLesson`
+ *  serde struct (camelCase). */
+export interface AudioLesson {
+  pillar: PillarId;
+  topic: string;
+  /** Full narration script (clean prose, no markdown/genui). */
+  script: string;
+  /** Base64-encoded MP3 of the full multi-chunk narration. */
+  audioBase64: string;
+  /** Rough spoken-duration estimate in seconds. */
+  durationEstimateSecs: number;
+  /** Number of TTS chunks synthesized and concatenated. */
+  segmentCount: number;
+}
+
+/** Payload of the `audio-lesson-progress` Tauri event. */
+export interface AudioLessonProgress {
+  stage: string;
+  current: number;
+  total: number;
+}
+
 // ── Spaced Repetition ─────────────────────────────────────────────────────────
 
 export type ReviewItemType = 'flashcard' | 'quiz';
