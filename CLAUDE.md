@@ -38,8 +38,9 @@ Rust Backend (Tauri v2 + rusqlite + Tokio)
     │   ├── rebalance.rs     → drift detection + adaptive plan rebalancing (get_pillar_drift, generate/apply/dismiss_plan_adjustment, maybe_generate_due_rebalance, get/set_rebalance_settings)
     │   ├── schedule.rs      → get_today_schedule, schedule_notification
     │   ├── source.rs        → URL / paper import (fetch_and_summarize_url) — network/parse only, no DB; SSRF-guarded fetch + scraper HTML extraction + optional collect_completion teaching brief
+    │   ├── listen.rs        → Listen Mode (generate_audio_lesson — podcast-style audio lessons)
     │   ├── sync_server.rs   → Axum-based local sync server (start/stop/status)
-    │   └── voice.rs         → STT model management, transcribe_audio, ElevenLabs TTS
+    │   └── voice.rs         → STT model management, transcribe_audio, ElevenLabs TTS (synthesize_tts helper)
     └── ai/                  → LLM provider implementations
         ├── provider.rs      → AiProvider trait (async_trait)
         ├── anthropic.rs     → Anthropic Claude (SSE streaming)
@@ -71,6 +72,7 @@ All AI responses stream via Tauri events — never polled:
 - `ai-token` → `appendToken(token)` in store
 - `ai-done` → `finalizeStream()` (parses GenUI, saves to messages)
 - `ai-error` → error display
+- `audio-lesson-progress` → Listen Mode generation progress (`{stage, current, total}`); see **Listen Mode (Audio Lessons)**
 
 The `useAI` hook in `src/hooks/useAI.ts` handles event subscriptions and calls the `stream_chat` Tauri command.
 
@@ -116,7 +118,7 @@ Axum HTTP server on a local port (start/stop via Tauri commands). Used to sync c
 - `whisper-rs` — whisper.cpp via FFI (higher accuracy, requires cmake)
 Models downloaded on demand. Status tracked by `SttModelStatus`.
 
-**TTS**: ElevenLabs API. Voice ID configurable in `VoiceConfig`. Streamed audio bytes returned from Tauri command.
+**TTS**: ElevenLabs API. Voice ID configurable in `VoiceConfig`. Streamed audio bytes returned from Tauri command. `voice.rs::synthesize_tts(text, api_key, voice_id) -> Result<Vec<u8>, String>` is the shared UI-agnostic helper that returns raw MP3 bytes from the ElevenLabs streaming endpoint; `tts_elevenlabs` wraps it and base64-encodes, and Listen Mode reuses it for multi-chunk narration.
 
 ## Provider Config
 `ProviderConfig { provider, model, apiKey?, baseUrl? }` persisted in Zustand.
@@ -125,7 +127,7 @@ Default: `anthropic / claude-sonnet-4-5`.
 
 ## Key Types
 All TypeScript interfaces in `src/data/types.ts`. Match Rust serde structs exactly (camelCase).
-Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`, `MasteryScore`, `ActivationResult`, `KnowledgeGap`, `GapSignalKind`, `DepthScore`, `DepthScoreData`, `ConversationDepth`, `PillarDrift`, `DriftReport`, `PillarStatus`, `AdjustmentStatus`, `PillarAdjustment`, `PlanAdjustment`, `RebalanceSettings`, `SourceSummary`, `FetchSourceRequest`.
+Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`, `MasteryScore`, `ActivationResult`, `KnowledgeGap`, `GapSignalKind`, `DepthScore`, `DepthScoreData`, `ConversationDepth`, `PillarDrift`, `DriftReport`, `PillarStatus`, `AdjustmentStatus`, `PillarAdjustment`, `PlanAdjustment`, `RebalanceSettings`, `SourceSummary`, `FetchSourceRequest`, `AudioLesson`, `AudioLessonProgress`.
 
 ## Spaced Repetition
 SM-2 algorithm in `src-tauri/src/commands/review.rs`. Quality grades 0–5 (≥3 passes). Failed reviews reset interval to 1 day; ease factor floored at 1.3.
@@ -169,6 +171,16 @@ Lets the learner paste an article or research-paper URL and have the tutor teach
 - **Frontend**: type `SourceSummary` ({ url, title, byline?, excerpt, content, wordCount, truncated, teachingBrief? }) in `src/data/types.ts` mirrors the Rust serde camelCase. Hook `src/hooks/useSourceImport.ts` → `useSourceImport()` returns `{ importUrl(url, generateBrief?), isImporting, error }`, threads `providerConfig`, swallows errors (returns `null` on failure). Pure helpers in `src/lib/sourceImport.ts`: `detectUrl(text)` (first http(s) URL, strips trailing punctuation) and `buildTeachPrompt(summary, pillarName)` (composes a pillar-aware teaching prompt that requests `genui` flashcard + quiz blocks).
 - **Pipeline reuse**: `buildTeachPrompt` deliberately asks for GenUI flashcard/quiz blocks so the generated content flows through the existing `parseGenUIBlocks()`/`finalizeStream()` and spaced-repetition pipeline — no new rendering or review path.
 - **UI**: `SourceImportChip.tsx` ("Teach from this" CTA) appears above the input when `InputBar.tsx` detects a URL; clicking it imports the source and seeds `buildTeachPrompt` via `onSend`.
+
+## Listen Mode (Audio Lessons)
+Podcast-style, single-narrator (solo) audio lessons generated on demand for a pillar/topic, grounded in the learner's current progress. Logic lives in `src-tauri/src/commands/listen.rs` (per-call `db::get_connection` pattern, like `review.rs`/`rebalance.rs`/`mastery.rs`). `generate_audio_lesson` is registered in `lib.rs`.
+- **Command**: `generate_audio_lesson(app, pillar, topic, config: ProviderConfig, api_key, voice_id) -> Result<AudioLesson, String>`. Generates a **fresh** 5–10 min script each call.
+- **Flow**: `gather_context` (brief synchronous read of: sessions `SUM(hours)` + 3 recent non-empty notes, `mastery_scores` `AVG(score)`, up to 4 open `knowledge_gaps` labels by severity) → `build_lesson_context` (pure) → `collect_completion` writes the script (`LESSON_SYSTEM_PROMPT`, 120s timeout) → `clean_script` strips markdown/genui/code-fences to spoken prose (pure) → `chunk_script` splits under `MAX_CHUNK_CHARS = 2400` on sentence/word boundaries, never splitting a word (pure) → `synthesize_tts` each chunk (reuses the `voice.rs` helper) → concatenate MP3 bytes → base64.
+- **Progress**: emits the `audio-lesson-progress` Tauri event (`{stage, current, total}`) so the UI shows generation progress.
+- **Pure helpers** `build_lesson_context`, `clean_script`, `chunk_script`, and `estimate_duration_secs` are unit-tested in the same file.
+- Frontend hook: `useListenMode` (`generate(pillar, topic)`, `isGenerating`, `lesson`, `audioUrl`, `progress`, `error`, `reset`) — decodes base64 → Blob → object URL (revoked on replace/unmount), reads `providerConfig` + `voiceConfig` from the store, guards against a missing ElevenLabs key.
+- Components: `AudioLessonPlayer` (auto-fires generate on open, live progress, native `<audio controls autoPlay>`, duration + segment count) opened from a per-block "Listen" button in `TodayCard`.
+- Types: `AudioLesson` (`pillar`, `topic`, `script`, `audioBase64`, `durationEstimateSecs`, `segmentCount`), `AudioLessonProgress` (`stage`, `current`, `total`).
 
 ## Tauri IPC Layer
 `src/lib/tauri.ts` provides `tauriInvoke()` and `tauriListen()` wrappers with browser fallback mocks for dev server testing without full Tauri.

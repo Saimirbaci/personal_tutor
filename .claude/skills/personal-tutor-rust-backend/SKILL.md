@@ -217,6 +217,52 @@ mod desktop_voice {
 
 Sherpa-onnx and whisper-rs are in `[target.'cfg(not(target_os = "android"))'.dependencies]` in Cargo.toml.
 
+### ElevenLabs TTS (all platforms)
+`voice.rs` exposes a shared, UI-agnostic helper that returns raw MP3 bytes from the ElevenLabs streaming endpoint:
+
+```rust
+// src-tauri/src/commands/voice.rs
+pub async fn synthesize_tts(text: &str, api_key: &str, voice_id: &str) -> Result<Vec<u8>, String>
+```
+
+The `tts_elevenlabs` command wraps `synthesize_tts` and base64-encodes the result. Listen Mode reuses `synthesize_tts` directly for multi-chunk narration.
+
+---
+
+## Listen Mode — Podcast-Style Audio Lessons
+
+`src-tauri/src/commands/listen.rs` generates a **fresh** 5–10 min single-narrator (solo podcast) script each call, grounded in the learner's current progress/mastery/gaps, then synthesizes it to MP3 via ElevenLabs and returns base64.
+
+```rust
+#[tauri::command]
+pub async fn generate_audio_lesson(
+    app: AppHandle,
+    pillar: String,
+    topic: String,
+    config: ProviderConfig,
+    api_key: String,
+    voice_id: String,
+) -> Result<AudioLesson, String>
+```
+
+`AudioLesson` (serde camelCase): `pillar`, `topic`, `script`, `audioBase64`, `durationEstimateSecs`, `segmentCount`.
+
+**Pattern**: per-call `db::get_connection` (like `review.rs`/`rebalance.rs`/`mastery.rs`) — no shared `DbState`.
+
+**Flow**:
+1. `gather_context` — brief synchronous read: `sessions` `SUM(hours)` + 3 recent non-empty notes, `mastery_scores` `AVG(score)`, up to 4 open `knowledge_gaps` labels ordered by severity.
+2. `build_lesson_context` (pure) — compact prose summary; always returns a usable string even with no history.
+3. `collect_completion` (in `commands/ai.rs`) writes the script with `LESSON_SYSTEM_PROMPT`, 120s timeout — no chat-stream events.
+4. `clean_script` (pure) — strips markdown/genui/code-fences down to clean spoken prose.
+5. `chunk_script` (pure) — splits under `MAX_CHUNK_CHARS = 2400` on sentence/word boundaries, never splitting a word.
+6. `synthesize_tts` each chunk → concatenate MP3 bytes → base64.
+
+Emits a Tauri event `audio-lesson-progress` with `{ stage, current, total }` (`emit_progress` helper) so the UI shows generation progress. Returns user-friendly errors (e.g. a missing ElevenLabs key) rather than raw provider output.
+
+Pure helpers `build_lesson_context`, `clean_script`, `chunk_script`, and `estimate_duration_secs` are unit-tested in the same file.
+
+Registered: `commands/mod.rs` adds `pub mod listen;`; `lib.rs` imports `listen` and registers `listen::generate_audio_lesson` in the invoke handler.
+
 ---
 
 ## Sync Server (Axum on 127.0.0.1)

@@ -372,12 +372,14 @@ pub async fn transcribe_audio(
 
 // ── ElevenLabs TTS (all platforms) ───────────────────────────────────────────
 
-#[tauri::command]
-pub async fn tts_elevenlabs(
-    text: String,
-    api_key: String,
-    voice_id: String,
-) -> Result<String, String> {
+/// Synthesizes a single chunk of text to MP3 bytes via the ElevenLabs streaming
+/// endpoint. Shared by `tts_elevenlabs` (single utterance) and the Listen Mode
+/// audio-lesson command (multi-chunk narration). UI-agnostic: returns raw bytes.
+pub async fn synthesize_tts(
+    text: &str,
+    api_key: &str,
+    voice_id: &str,
+) -> Result<Vec<u8>, String> {
     if api_key.is_empty() {
         return Err("ElevenLabs API key not set. Add it in Settings → Voice.".to_string());
     }
@@ -400,7 +402,7 @@ pub async fn tts_elevenlabs(
 
     let response = client
         .post(&url)
-        .header("xi-api-key", &api_key)
+        .header("xi-api-key", api_key)
         .header("Content-Type", "application/json")
         .header("Accept", "audio/mpeg")
         .json(&body)
@@ -418,6 +420,16 @@ pub async fn tts_elevenlabs(
     }
 
     let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    Ok(bytes.to_vec())
+}
+
+#[tauri::command]
+pub async fn tts_elevenlabs(
+    text: String,
+    api_key: String,
+    voice_id: String,
+) -> Result<String, String> {
+    let bytes = synthesize_tts(&text, &api_key, &voice_id).await?;
     Ok(STANDARD.encode(&bytes))
 }
 

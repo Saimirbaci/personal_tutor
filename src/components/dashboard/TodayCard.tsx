@@ -1,8 +1,11 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Play, Clock } from 'lucide-react';
+import { AnimatePresence } from 'framer-motion';
+import { Play, Clock, Headphones } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
-import { ScheduleBlock, TodaySchedule } from '@/data/types';
+import { PillarId, ScheduleBlock, TodaySchedule } from '@/data/types';
 import { cn } from '@/lib/utils';
+import AudioLessonPlayer from './AudioLessonPlayer';
 
 interface TodayCardProps {
   schedule: TodaySchedule;
@@ -12,6 +15,7 @@ interface TodayCardProps {
 export default function TodayCard({ schedule, currentBlock }: TodayCardProps) {
   const { setView } = useAppStore();
   const navigate = useNavigate();
+  const [listenBlock, setListenBlock] = useState<ScheduleBlock | null>(null);
 
   const handleStart = (_block: ScheduleBlock) => {
     setView('tutor');
@@ -26,6 +30,19 @@ export default function TodayCard({ schedule, currentBlock }: TodayCardProps) {
         </h2>
         <span className="text-xs text-[#4a5568] font-mono">Week {schedule.week_number}</span>
       </div>
+
+      <AnimatePresence>
+        {listenBlock && (
+          <div className="mb-4">
+            <AudioLessonPlayer
+              pillar={listenBlock.pillar as PillarId}
+              topic={listenBlock.topic}
+              color={listenBlock.color}
+              onClose={() => setListenBlock(null)}
+            />
+          </div>
+        )}
+      </AnimatePresence>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {schedule.blocks.map((block) => {
@@ -83,17 +100,30 @@ export default function TodayCard({ schedule, currentBlock }: TodayCardProps) {
                 <span className="text-[10px] font-mono text-[#4a5568]">
                   {block.duration_min} min
                 </span>
-                <button
-                  className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold text-white"
-                  style={{ backgroundColor: block.color }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleStart(block);
-                  }}
-                >
-                  <Play size={8} />
-                  Start
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold text-[#94a3b8] border border-[#1a2540] hover:text-[#e2e8f0]"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setListenBlock(block);
+                    }}
+                    title="Generate a podcast-style audio lesson"
+                  >
+                    <Headphones size={8} />
+                    Listen
+                  </button>
+                  <button
+                    className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold text-white"
+                    style={{ backgroundColor: block.color }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleStart(block);
+                    }}
+                  >
+                    <Play size={8} />
+                    Start
+                  </button>
+                </div>
               </div>
             </div>
           );

@@ -59,6 +59,7 @@ personal_tutor/
 │   │   ├── useAI.ts               ← AI streaming, system prompt builder, event subscriptions
 │   │   ├── useVoice.ts            ← STT/TTS, model download, transcription
 │   │   ├── useProgress.ts         ← Session logging, streak, milestones
+│   │   ├── useListenMode.ts       ← Listen Mode: generate_audio_lesson, base64→Blob audioUrl, progress
 │   │   └── useSourceImport.ts     ← importUrl(url, generateBrief?) → fetch_and_summarize_url
 │   ├── lib/
 │   │   ├── tauri.ts               ← tauriInvoke<T>() + tauriListen<T>() wrappers with browser mocks
@@ -84,9 +85,13 @@ personal_tutor/
         │   ├── source.rs          ← fetch_and_summarize_url (URL/paper import, scraper HTML extract, SSRF guard)
         │   ├── schedule.rs        ← get_today_schedule, schedule_notification,
         │   │                         get_morning_briefing (aggregates schedule + streak + reviews)
+        │   ├── listen.rs          ← Listen Mode: generate_audio_lesson (solo-podcast script +
+        │   │                         ElevenLabs MP3); pure helpers build_lesson_context,
+        │   │                         clean_script, chunk_script, estimate_duration_secs
         │   ├── sync_server.rs     ← start_sync_server, stop_sync_server, get_sync_server_status
-        │   └── voice.rs           ← get_stt_model_status, download_stt_model,
-        │                             transcribe_audio, tts_elevenlabs, get_elevenlabs_voices
+        │   └── voice.rs           ← get_stt_model_status, download_stt_model, transcribe_audio,
+        │                             tts_elevenlabs (wraps shared synthesize_tts → raw MP3 bytes),
+        │                             get_elevenlabs_voices
         └── ai/
             ├── provider.rs        ← AiProvider trait (async_trait)
             ├── anthropic.rs       ← Anthropic Claude SSE streaming
@@ -133,6 +138,24 @@ personal_tutor/
     b. Creates AiMessage { role:'assistant', content: text, genui: blocks }
     c. Appends to messages[], clears streaming state
 11. React re-renders: TutorChat shows message, GenUIRenderer renders blocks
+```
+
+---
+
+## Data Flow: Listen Mode — Podcast-Style Audio Lessons
+
+```
+1. TodayCard "Listen" button opens an inline AudioLessonPlayer for a block's pillar/topic
+2. AudioLessonPlayer auto-fires useListenMode.generate(pillar, topic)
+3. tauriInvoke('generate_audio_lesson', { pillar, topic, config, apiKey, voiceId }) → Rust
+4. listen.rs gather_context (db::get_connection: sessions hours + recent notes,
+   mastery AVG, open knowledge_gaps) → build_lesson_context (pure)
+5. collect_completion writes a fresh 5–10 min solo-podcast script (LESSON_SYSTEM_PROMPT, 120s timeout)
+6. clean_script strips markdown/genui/code-fences → chunk_script (<MAX_CHUNK_CHARS=2400, word-safe)
+7. synthesize_tts each chunk (shared voice.rs helper) → concatenate MP3 bytes → base64
+8. Emits 'audio-lesson-progress' { stage, current, total } throughout for live UI progress
+9. Returns AudioLesson { pillar, topic, script, audioBase64, durationEstimateSecs, segmentCount }
+10. useListenMode decodes base64 → Blob → object URL; <audio controls autoPlay> plays it
 ```
 
 ---
