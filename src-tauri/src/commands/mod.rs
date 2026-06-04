@@ -10,6 +10,7 @@ pub mod progress;
 pub mod rebalance;
 pub mod review;
 pub mod schedule;
+pub mod source;
 pub mod summaries;
 pub mod sync_server;
 pub mod voice;

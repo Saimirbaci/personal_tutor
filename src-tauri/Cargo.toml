@@ -29,6 +29,9 @@ axum = { version = "0.7", features = ["json"] }
 tower = "0.4"
 tower-http = { version = "0.5", features = ["cors"] }
 base64 = "0.22"
+# HTML parsing for URL/paper import (clean readable-text extraction)
+scraper = "0.20"
+url = "2"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 # whisper.cpp via FFI — desktop only (requires cmake + C++ toolchain)

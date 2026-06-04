@@ -4,8 +4,8 @@ pub mod db;
 
 use commands::{
     activation, ai as ai_cmd, analytics, conversations as conv_cmd, depth, digest as digest_cmd,
-    gaps, mastery, progress, rebalance, review, schedule, summaries as summary_cmd,
-    sync_server as sync_cmd, voice as voice_cmd,
+    gaps, mastery, progress, rebalance, review, schedule, source as source_cmd,
+    summaries as summary_cmd, sync_server as sync_cmd, voice as voice_cmd,
 };
 use sync_cmd::SyncServerHandle;
 use tauri::Manager;
@@ -65,6 +65,7 @@ pub fn run() {
             depth::save_conversation_depth,
             depth::get_conversation_depth,
             depth::list_conversation_depths,
+            source_cmd::fetch_and_summarize_url,
             schedule::get_today_schedule,
             schedule::schedule_notification,
             schedule::get_morning_briefing,
