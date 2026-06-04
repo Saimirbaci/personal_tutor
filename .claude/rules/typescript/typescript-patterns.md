@@ -10,7 +10,7 @@
 - Single store: `src/store/appStore.ts` — do not create additional stores
 - All AI streaming state lives in the store: `messages`, `isStreaming`, `streamingContent`, `currentToken`
 - Never store derived data in the store — compute with selectors
-- Persisted keys: `providerConfig`, `voiceConfig`, `forgettingCurveSettings`, `sidebarCollapsed`, `activePillar`
+- Persisted keys: `providerConfig`, `voiceConfig`, `forgettingCurveSettings`, `sidebarCollapsed`, `activePillar`, `socraticModeByPillar`
 - Ephemeral (NOT persisted) drift/rebalance keys: `pillarDrift`, `planAdjustments`, `pendingPrompt` — `pendingPrompt` is a one-shot queued for the tutor (e.g. a drift catch-up drill), consumed once after the tutor mounts
 - Use `useAppStore` hook — always select only what the component needs:
 

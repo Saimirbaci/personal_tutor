@@ -27,7 +27,7 @@ Produce clear, phased implementation plans that account for the full stack. Neve
 - `ai/provider.rs` — `AiProvider` async_trait; providers: `anthropic.rs`, `google.rs`, `ollama.rs`, `openrouter.rs`
 
 **Frontend (React + TS, `src/`):**
-- `store/appStore.ts` — single Zustand store. New state/actions must be added to `AppState` interface AND the store impl. Persisted: `providerConfig`, `voiceConfig`, `sidebarCollapsed`, `activePillar`. Backend-loaded data (e.g. `weeklyDigests`) stays ephemeral.
+- `store/appStore.ts` — single Zustand store. New state/actions must be added to `AppState` interface AND the store impl. Persisted: `providerConfig`, `voiceConfig`, `forgettingCurveSettings`, `sidebarCollapsed`, `activePillar`, `socraticModeByPillar`, `activationQuizEnabled`, `activationQuizLength`. Backend-loaded data (e.g. `weeklyDigests`) stays ephemeral.
 - `data/types.ts` — all shared TypeScript interfaces. New types here first.
 - `hooks/` — all Tauri calls live in hooks, never in components: `useAI` (streaming), `useVoice`, `useProgress`, `useReview`, `useSessionSummary`, `useConversationSummary`, `useWeeklyDigest`, `usePlan`, `useConversations`, `useMobile`
 - `lib/tauri.ts` — `tauriInvoke<T>()` and `tauriListen<T>()` wrappers used in hooks
@@ -38,7 +38,7 @@ Produce clear, phased implementation plans that account for the full stack. Neve
 3. New DB tables go in `db/mod.rs::init()` execute_batch — no separate migration files.
 4. GenUI blocks (`<genui type="...">`) are parsed in `finalizeStream()` in appStore.ts.
 5. STT code is gated with `#[cfg(not(target_os = "android"))]`.
-6. Persisted Zustand state: `providerConfig`, `voiceConfig`, `sidebarCollapsed`, `activePillar` only.
+6. Persisted Zustand state: `providerConfig`, `voiceConfig`, `forgettingCurveSettings`, `sidebarCollapsed`, `activePillar`, `socraticModeByPillar`, `activationQuizEnabled`, `activationQuizLength`.
 
 ## Plan Format
 

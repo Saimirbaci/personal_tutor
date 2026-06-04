@@ -157,7 +157,11 @@ pub mod newprovider;
 ## System Prompt Builder (`src/hooks/useAI.ts`)
 
 ```typescript
-function buildContextualSystemPrompt(pillar: PillarId | null): string {
+function buildContextualSystemPrompt(
+  pillar: PillarId | null,
+  gaps: KnowledgeGap[],
+  socratic: boolean = false
+): string {
   const weekNumber = getWeekNumber(); // based on June 1 start date
   
   const base = `You are a personal learning tutor for Saimir Baci,
@@ -175,12 +179,18 @@ GenUI syntax:
 <genui type="diagram">graph TD; A-->B</genui>
 <genui type="key-insight">Concise insight text</genui>`;
 
+  let prompt = base;
   if (pillar) {
-    return base + `\n\nCurrent pillar: ${pillar}. Sprint week: ${weekNumber}.`;
+    prompt += `\n\nCurrent pillar: ${pillar}. Sprint week: ${weekNumber}.`;
   }
-  return base;
+  if (socratic) {
+    prompt += `\n\n${SOCRATIC_MODIFIER}`;  // Retrieval-forcing, question-back style
+  }
+  return prompt;
 }
 ```
+
+**Socratic Mode:** When `socratic` is true (per-pillar toggle in `socraticModeByPillar`, keyed via `socraticKey(pillar)`), appends `SOCRATIC_MODIFIER` which flips the tutor from explain-first to retrieval-forcing, question-back style.
 
 The system prompt is always prepended to the messages array sent to `stream_chat`.
 

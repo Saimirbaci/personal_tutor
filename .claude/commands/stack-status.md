@@ -35,7 +35,7 @@ Report if any tables look incomplete (missing `created_at`, missing FK constrain
 ### 6. Zustand Store Health
 Read `src/store/appStore.ts` and check:
 - `AppState` interface matches the store implementation
-- Persisted keys are what's expected: `providerConfig`, `voiceConfig`, `sidebarCollapsed`, `activePillar`
+- Persisted keys are what's expected: `providerConfig`, `voiceConfig`, `forgettingCurveSettings`, `sidebarCollapsed`, `activePillar`, `socraticModeByPillar`, `activationQuizEnabled`, `activationQuizLength`
 - No obviously stale state (state fields that are defined but never used)
 
 ### 7. GenUI Coverage
