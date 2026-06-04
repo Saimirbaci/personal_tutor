@@ -1,6 +1,6 @@
 ---
 name: personal-tutor-overview
-description: "Full architecture, stack, and codemap for the Personal Tutor app. Use this skill at the start of any new session, when planning a cross-cutting feature, or when you need to understand where something lives in the codebase. Trigger on: 'where does X live', 'how does X work', 'what is the architecture', starting a new session on this project, or any question that spans both Rust backend and React frontend."
+description: "Full architecture, stack, and codemap for the Personal Tutor app. Use this skill at the start of any new session, when planning a cross-cutting feature, or when you need to understand where something lives in the codebase. Trigger on: 'where does X live', 'how does X work', 'what is the architecture', starting a new session on this project, source import / URL import / paper import / fetch_and_summarize_url / teach from source, or any question that spans both Rust backend and React frontend."
 ---
 
 # Personal Tutor — Full Architecture & Codemap
@@ -23,6 +23,7 @@ Personal AI tutor app for **Saimir Baci** (CTO & co-founder of Augmentifai) duri
 | Backend language | Rust + Tokio async runtime |
 | Database | rusqlite 0.31 (bundled SQLite) + WAL mode |
 | HTTP client | reqwest 0.12 (stream + rustls-tls) |
+| HTML parsing | scraper 0.20 + url 2 (URL/paper import readable-text extraction) |
 | Local server | Axum 0.7 (sync server) |
 | Serialization | serde + serde_json |
 | Frontend | React 18 + TypeScript + Vite 5 |
@@ -57,10 +58,12 @@ personal_tutor/
 │   ├── hooks/
 │   │   ├── useAI.ts               ← AI streaming, system prompt builder, event subscriptions
 │   │   ├── useVoice.ts            ← STT/TTS, model download, transcription
+│   │   ├── useProgress.ts         ← Session logging, streak, milestones
 │   │   ├── useListenMode.ts       ← Listen Mode: generate_audio_lesson, base64→Blob audioUrl, progress
-│   │   └── useProgress.ts         ← Session logging, streak, milestones
+│   │   └── useSourceImport.ts     ← importUrl(url, generateBrief?) → fetch_and_summarize_url
 │   ├── lib/
-│   │   └── tauri.ts               ← tauriInvoke<T>() + tauriListen<T>() wrappers with browser mocks
+│   │   ├── tauri.ts               ← tauriInvoke<T>() + tauriListen<T>() wrappers with browser mocks
+│   │   └── sourceImport.ts        ← detectUrl(text), buildTeachPrompt(summary, pillarName) pure helpers
 │   ├── components/                ← Reusable UI components
 │   └── views/                     ← Full-page views
 │
@@ -79,6 +82,7 @@ personal_tutor/
         │   │                         rename_conversation, bulk_import_sync
         │   ├── progress.rs        ← log_session, get_progress, get_streak, update_milestone
         │   ├── review.rs          ← SM-2: record_review_attempt, get_due_reviews, get_review_counts
+        │   ├── source.rs          ← fetch_and_summarize_url (URL/paper import, scraper HTML extract, SSRF guard)
         │   ├── schedule.rs        ← get_today_schedule, schedule_notification,
         │   │                         get_morning_briefing (aggregates schedule + streak + reviews)
         │   ├── listen.rs          ← Listen Mode: generate_audio_lesson (solo-podcast script +
@@ -185,7 +189,7 @@ review_items   (item_id, item_type, pillar, ease_factor, interval_days, repetiti
 
 ## Zustand Store Structure (`appStore.ts`)
 
-**Persisted** (survive app restart): `providerConfig`, `voiceConfig`, `sidebarCollapsed`, `activePillar`
+**Persisted** (survive app restart): `providerConfig`, `voiceConfig`, `sidebarCollapsed`, `activePillar`, `socraticModeByPillar`
 
 **Ephemeral** (lost on restart): `messages`, `isStreaming`, `streamingContent`, `currentToken`, `activeConversationId`, `conversationList`, `progress`, `streak`
 

@@ -10,7 +10,7 @@
 - Single store: `src/store/appStore.ts` — do not create additional stores
 - All AI streaming state lives in the store: `messages`, `isStreaming`, `streamingContent`, `currentToken`
 - Never store derived data in the store — compute with selectors
-- Persisted keys: `providerConfig`, `voiceConfig`, `forgettingCurveSettings`, `sidebarCollapsed`, `activePillar`
+- Persisted keys: `providerConfig`, `voiceConfig`, `forgettingCurveSettings`, `sidebarCollapsed`, `activePillar`, `socraticModeByPillar`
 - Ephemeral (NOT persisted) drift/rebalance keys: `pillarDrift`, `planAdjustments`, `pendingPrompt` — `pendingPrompt` is a one-shot queued for the tutor (e.g. a drift catch-up drill), consumed once after the tutor mounts
 - Use `useAppStore` hook — always select only what the component needs:
 
@@ -47,6 +47,7 @@ useEffect(() => {
 - Drift: `useDrift` — `loadDrift(thresholdDays?)` calls `get_pillar_drift`, stores the `DriftReport` (auto-loads on mount)
 - Rebalance: `usePlanRebalance` — `loadAdjustments`, `generate`, `apply(weekStart)`, `dismiss(weekStart)`, `maybeGenerateDue` wrap the plan-rebalance commands
 - Forgetting curve: `useForgettingCurve` — in-app poll that fires OS nudges (quiet-hours + daily-cap gated); `useForgettingNudgePreview` is a read-only fetch that must NOT call `mark_review_notified`
+- Source import: `useSourceImport` — `importUrl(url, generateBrief?)` calls `fetch_and_summarize_url` (threads `providerConfig`), exposes `isImporting`/`error`, swallows failures into `error` state and returns `null` (never throws); pure URL/prompt helpers (`detectUrl`, `buildTeachPrompt`) live in `src/lib/sourceImport.ts`
 - Listen Mode: `useListenMode` — `generate(pillar, topic)` calls `generate_audio_lesson`, subscribes to `audio-lesson-progress`, decodes the base64 MP3 to a Blob object URL for `<audio>` (revokes the URL on replace/unmount); exposes `{ generate, isGenerating, lesson, audioUrl, progress, error, reset }`
 - Background polls/timers must guard against React StrictMode double-mount (e.g. a `startedRef`) and clear their interval on cleanup
 - Never call `tauriInvoke` directly inside React components

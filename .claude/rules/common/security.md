@@ -29,6 +29,14 @@
 - Add authentication before accepting any data from the sync endpoint
 - Validate sync payloads with Serde before touching the database
 
+## Outbound URL Fetching (SSRF)
+The app fetches arbitrary user-supplied URLs (`commands/source.rs::fetch_and_summarize_url` for URL / Paper Import). This is new attack surface — treat every fetched URL as hostile.
+- Gate every user-supplied URL through `validate_public_url(raw)` before fetching. It must: allow `http`/`https` only; reject `localhost`, `.local`, `.localhost`; and reject private/loopback/link-local/unspecified addresses for both IPv4 and IPv6 (incl. `169.254.0.0/16` cloud-metadata, `127.0.0.0/8`, `[::1]`, and unspecified `0.0.0.0`/`[::]`).
+- Cap response body size with a streamed read (`read_capped`, `MAX_BODY_BYTES = 5MB`) — never `bytes().await` an untrusted response unbounded (memory-exhaustion DoS).
+- Set an explicit request timeout (30s) on the fetch client.
+- Never expose raw fetch/parse errors (network, DNS, TLS, HTTP status) to the UI — wrap in a generic user-facing message ("Couldn't import that URL.").
+- Treat extracted page text as untrusted input: it flows into an LLM prompt (`buildTeachPrompt`) — never into the *system* prompt, and never execute or eval it.
+
 ## Voice Data
 - Audio data is base64-encoded and sent to ElevenLabs/STT services — never persisted locally
 - Do not log audio buffers or transcription results at DEBUG level in production builds

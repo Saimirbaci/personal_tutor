@@ -1,6 +1,6 @@
 ---
 name: personal-tutor-rust-backend
-description: "Deep knowledge of the Personal Tutor Rust/Tauri backend. Use for: adding Tauri commands, database operations with rusqlite, streaming AI responses, sync server changes, voice command implementation, or any src-tauri/ work. Trigger when the user mentions commands/, db/, Cargo.toml, rusqlite, Mutex, stream_chat, or any backend Rust file."
+description: "Deep knowledge of the Personal Tutor Rust/Tauri backend. Use for: adding Tauri commands, database operations with rusqlite, streaming AI responses, sync server changes, voice command implementation, URL/paper import, or any src-tauri/ work. Trigger when the user mentions commands/, db/, Cargo.toml, rusqlite, Mutex, stream_chat, fetch_and_summarize_url, source.rs, scraper, SSRF, or any backend Rust file."
 ---
 
 # Personal Tutor — Rust Backend Deep Dive
@@ -182,6 +182,20 @@ pub trait AiProvider: Send + Sync {
 
 ---
 
+## URL / Paper Import (`commands/source.rs`)
+
+`fetch_and_summarize_url(request: FetchSourceRequest) -> Result<SourceSummary, String>` — network/parse command, **no DB** (does not use `DbState` or `db::get_connection`). Registered in `lib.rs` invoke_handler; `pub mod source` in `commands/mod.rs`.
+
+- Fetches a URL with reqwest (30s timeout, browser UA), caps body at `MAX_BODY_BYTES` (5MB) via streamed `read_capped`.
+- Extracts readable text with the `scraper` crate in `spawn_blocking` (scraper's `Html` is `!Send` — never hold it across `.await`).
+- Pure testable helpers:
+  - `extract_readable(html, base)` — title/byline/content via scraper selectors; strips nav/footer/header/aside/script/style; prefers article/main/[role=main]; prefers og:title.
+  - `validate_public_url(raw) -> Result<Url, String>` — SSRF guard: http/https only; blocks localhost/.local/.localhost and private/loopback/link-local/unspecified IPv4+IPv6 (incl. 169.254.x metadata, [::1]).
+  - `truncate_content` — caps at `MAX_CONTENT_CHARS` (12000), returns truncated flag.
+  - `make_excerpt` — 280-char preview.
+- Optional AI teaching brief via `collect_completion` (best-effort `.ok()` — never fails the import if API key missing).
+- Has `#[cfg(test)] mod tests` with 8 unit tests (extraction, boilerplate stripping, title fallback, og:title, URL scheme/host validation, private-host rejection, truncation, excerpt bounding).
+
 ## Voice Commands (Desktop Only)
 
 ```rust
@@ -285,6 +299,8 @@ uuid = { version = "1", features = ["v4"] }
 async-trait = "0.1"
 axum = { version = "0.7", features = ["json"] }
 base64 = "0.22"
+scraper = "0.20"   # HTML parsing for URL/paper import (Html is !Send — use spawn_blocking)
+url = "2"          # URL validation / SSRF guard in commands/source.rs
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 whisper-rs = { version = "0.14" }   # requires cmake + C++ toolchain

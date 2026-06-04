@@ -558,6 +558,25 @@ export interface ConversationDepth {
   conversationPillar?: PillarId | null;
 }
 
+// ── URL / Paper Import (Teach-From-Source) ─────────────────────────────────────
+
+/** Cleaned, readable extraction of a fetched article/paper.
+ *  Mirrors the Rust `SourceSummary` serde struct (camelCase). */
+export interface SourceSummary {
+  url: string;
+  title: string;
+  byline?: string | null;
+  /** Short plain-text preview of the body. */
+  excerpt: string;
+  /** Cleaned, possibly-truncated readable body fed to the tutor. */
+  content: string;
+  wordCount: number;
+  /** True when the body exceeded the backend budget and was clipped. */
+  truncated: boolean;
+  /** Optional AI-drafted teaching brief (only when requested). */
+  teachingBrief?: string | null;
+}
+
 // ── Knowledge Gaps ────────────────────────────────────────────────────────────
 
 export type GapSignalKind = 'weak_quiz' | 'low_ease' | 'shallow_chat' | 'stale';

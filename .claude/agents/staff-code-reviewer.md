@@ -58,7 +58,7 @@ Review code changes for correctness, safety, and consistency with the project's 
 - AI providers implement `AiProvider` trait — new providers must follow `anthropic.rs` pattern
 - Voice commands gated with `#[cfg(not(target_os = "android"))]`
 - GenUI types: `diagram` and `key-insight` pass data as string; all others parse as JSON
-- Zustand persist keys: `providerConfig`, `voiceConfig`, `sidebarCollapsed`, `activePillar` — don't add new persisted keys without good reason
+- Zustand persist keys: `providerConfig`, `voiceConfig`, `forgettingCurveSettings`, `sidebarCollapsed`, `activePillar`, `socraticModeByPillar`, `activationQuizEnabled`, `activationQuizLength` — don't add new persisted keys without good reason
 
 ## Output Format
 1. **Blockers** (must fix before merge) — each with specific code fix
