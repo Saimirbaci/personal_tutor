@@ -134,7 +134,41 @@ export function useProgress() {
 }
 ```
 
-Existing hooks: `useAI`, `useVoice`, `useProgress` — extend these before creating new ones.
+Existing hooks: `useAI`, `useVoice`, `useProgress`, `useListenMode` — extend these before creating new ones.
+
+---
+
+## Listen Mode Hook (`src/hooks/useListenMode.ts`)
+
+Generates a podcast-style audio lesson via the Rust `generate_audio_lesson` command, then decodes the returned base64 MP3 into a playable object URL. Returns `{ generate(pillar, topic), isGenerating, lesson, audioUrl, progress, error, reset }`.
+
+```typescript
+const { generate, isGenerating, lesson, audioUrl, progress, error, reset } = useListenMode();
+
+// Reads providerConfig + voiceConfig from the store; guards against a missing key:
+if (!voiceConfig.elevenLabsApiKey) { /* set a friendly error, bail */ }
+
+const result = await tauriInvoke<AudioLesson>('generate_audio_lesson', {
+  pillar, topic,
+  config: providerConfig,
+  apiKey: voiceConfig.elevenLabsApiKey,
+  voiceId: voiceConfig.elevenLabsVoiceId,
+});
+
+// base64 → Blob → object URL for an <audio> element:
+const bytes = Uint8Array.from(atob(result.audioBase64), (c) => c.charCodeAt(0));
+const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
+```
+
+Key patterns:
+- Subscribes to the `audio-lesson-progress` event via `tauriListen` while generating (`{ stage, current, total }` → `AudioLessonProgress`), unlistening in `finally`.
+- Tracks the active object URL in a `urlRef` and revokes it on replace, on `reset()`, and on unmount (`useEffect(() => revoke, [revoke])`) — never leaks a Blob URL.
+- Swallows command errors into the `error` string (no throw); missing ElevenLabs key short-circuits before invoking.
+
+### Listen Mode Components
+
+- `src/components/dashboard/AudioLessonPlayer.tsx` — auto-fires `generate` on open, shows live progress (writing script / synthesizing N/total), renders a native `<audio controls autoPlay>` for `audioUrl`, plus duration + segment count, with graceful error display.
+- `src/components/dashboard/TodayCard.tsx` — each schedule block has a "Listen" button (Headphones icon) next to "Start" that opens an inline `AudioLessonPlayer` for that block's pillar/topic.
 
 ---
 
@@ -165,6 +199,22 @@ interface ProviderConfig {
   apiKey?: string;
   model: string;
   baseUrl?: string;
+}
+
+// Listen Mode (audio lessons) — mirror Rust serde structs (camelCase)
+interface AudioLesson {
+  pillar: PillarId;
+  topic: string;
+  script: string;          // clean spoken prose (no markdown/genui)
+  audioBase64: string;     // MP3 of the full multi-chunk narration
+  durationEstimateSecs: number;
+  segmentCount: number;    // number of TTS chunks concatenated
+}
+
+interface AudioLessonProgress {  // payload of the audio-lesson-progress event
+  stage: string;
+  current: number;
+  total: number;
 }
 ```
 

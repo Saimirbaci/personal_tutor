@@ -29,7 +29,7 @@ pub async fn command_name(
 ## Database (rusqlite)
 Two access patterns coexist — pick one consistently per command file:
 - **Shared `DbState(pub Mutex<Connection>)`** — preferred for write-heavy or transactional flows. Always `lock().map_err(|e| e.to_string())?` — never `.unwrap()`. Lock for the shortest possible scope; extract data and release before any `await`.
-- **Per-call `db::get_connection(&app)`** — opens a fresh `Connection` (used by `review.rs` and `rebalance.rs`). Safe under WAL for short reads/writes; useful for synchronous `#[tauri::command] pub fn` handlers that don't share state.
+- **Per-call `db::get_connection(&app)`** — opens a fresh `Connection` (used by `review.rs`, `rebalance.rs`, `mastery.rs`, and `listen.rs`). Safe under WAL for short reads/writes; useful for synchronous `#[tauri::command] pub fn` handlers that don't share state. `listen.rs` does a brief synchronous `get_connection` read to gather learner context, then releases it before the async AI + TTS work.
 
 Rules that apply to both:
 - Use parameterized queries exclusively: `params![val1, val2]`
@@ -101,6 +101,11 @@ collector.await.map_err(|e| e.to_string())
 
 ### Non-Streaming Background AI
 For background features that need an AI rationale without touching the live chat stream (e.g. plan rebalancing), use `collect_completion(messages, system, config, timeout_secs)` in `commands/ai.rs`. It reuses the provider's `stream_completion` plumbing but collects tokens into a buffer via an mpsc channel instead of emitting them to the UI, bounded by a timeout. Returns the full text as `Result<String, String>`.
+
+### UI-Agnostic Shared Helpers
+- Keep network/synthesis work in a UI-agnostic `pub async fn` helper, then have the `#[tauri::command]` thinly wrap it. Example: `voice.rs::synthesize_tts(text, api_key, voice_id) -> Result<Vec<u8>, String>` returns raw MP3 bytes from the ElevenLabs streaming endpoint; the `tts_elevenlabs` command wraps it and base64-encodes, while `listen.rs` reuses it directly for multi-chunk narration.
+- Push multi-step progress to the UI with a Tauri event rather than a return-value-only flow. `listen.rs::generate_audio_lesson` emits `audio-lesson-progress` (`{stage, current, total}`) per chunk so the player shows generation progress.
+- Extract `build_lesson_context`, `clean_script`, and `chunk_script` (split under `MAX_CHUNK_CHARS`, never splitting a word) as pure helpers, unit-tested in `listen.rs`.
 
 ## AI Provider Trait
 ```rust
