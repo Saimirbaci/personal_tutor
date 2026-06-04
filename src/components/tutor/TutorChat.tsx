@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { PanelLeft, Plus, Trash2, Pencil, Check, X, MessageSquare, FileText, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { PanelLeft, Plus, Trash2, Pencil, Check, X, MessageSquare, FileText, ArrowRight, CheckCircle2, MessageCircleQuestion } from 'lucide-react';
 import { tauriInvoke } from '@/lib/tauri';
 import { useAppStore } from '@/store/appStore';
 import { useAI } from '@/hooks/useAI';
@@ -13,6 +13,7 @@ import { runDepthScore } from '@/hooks/useDepthScore';
 import { PILLARS, PLAN } from '@/data/plan';
 import { PillarId, CurriculumItem, ConversationDepth } from '@/data/types';
 import { singleReviewPrompt } from '@/lib/reviewPrompts';
+import { socraticKey } from '@/lib/utils';
 import { ConversationListEntry } from '@/store/appStore';
 import MessageBubble from './MessageBubble';
 import InputBar from './InputBar';
@@ -202,9 +203,15 @@ export default function TutorChat() {
   } = useConversations();
   const { speak, state: _voiceState } = useVoice();
   const { voiceConfig } = useAppStore((s) => ({ voiceConfig: s.voiceConfig }));
+  const socraticModeByPillar = useAppStore((s) => s.socraticModeByPillar);
+  const toggleSocraticMode = useAppStore((s) => s.toggleSocraticMode);
   const isMobile = useMobile();
 
   const [selectedPillar, setSelectedPillar] = useState<PillarId | null>(activePillar);
+  // Socratic Mode is scoped to the header's current pillar context — the same
+  // value passed to sendMessage as contextPillar — so the toggle and the prompt
+  // always key off identical state (via socraticKey).
+  const socraticOn = !!socraticModeByPillar[socraticKey(selectedPillar)];
   // Conversation sidebar: closed by default on mobile to give chat full width
   const [sidebarOpen, setSidebarOpen] = useState(!isMobile);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -638,6 +645,23 @@ export default function TutorChat() {
               ))}
             </div>
           </div>
+
+          {/* Socratic Mode toggle — scoped to the current pillar context */}
+          <button
+            onClick={() => toggleSocraticMode(selectedPillar)}
+            title={
+              socraticOn
+                ? `Socratic Mode ON — the tutor asks questions back instead of explaining (scoped to ${selectedPillar ?? 'general'} context)`
+                : `Socratic Mode OFF — turn on to force retrieval with question-back prompts (scoped to ${selectedPillar ?? 'general'} context)`
+            }
+            className={`flex-shrink-0 p-1.5 rounded-lg border transition-all ${
+              socraticOn
+                ? 'border-[#2E5FA3] text-[#2E5FA3] bg-[#2E5FA3]/10'
+                : 'border-[#1a2540] text-[#4a5568] hover:text-[#e2e8f0] hover:border-[#4a5568]'
+            }`}
+          >
+            <MessageCircleQuestion size={13} />
+          </button>
 
           <button
             onClick={handleNewConversation}

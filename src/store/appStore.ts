@@ -16,6 +16,7 @@ import {
   VoiceConfig,
   WeeklyDigest,
 } from '@/data/types';
+import { socraticKey } from '@/lib/utils';
 
 const DEFAULT_FORGETTING_CURVE_SETTINGS: ForgettingCurveSettings = {
   enabled: true,
@@ -47,6 +48,10 @@ interface AppState {
   // Navigation
   currentView: ViewType;
   activePillar: PillarId | null;
+
+  // Socratic Mode — per-pillar toggle. Keyed by PillarId, plus a '__global__'
+  // sentinel for the no-pillar (general) tutor context. Persisted.
+  socraticModeByPillar: Record<string, boolean>;
 
   // Pre-session activation quiz
   pendingSessionPillar: PillarId | null;
@@ -112,6 +117,8 @@ interface AppState {
 
   // Actions
   setView: (view: ViewType, pillar?: PillarId) => void;
+  toggleSocraticMode: (pillar: PillarId | null) => void;
+  setSocraticMode: (pillar: PillarId | null, enabled: boolean) => void;
   startActivation: (pillar: PillarId) => void;
   completeActivation: () => void;
   setActivationQuizEnabled: (enabled: boolean) => void;
@@ -152,6 +159,7 @@ export const useAppStore = create<AppState>()(
     (set, get) => ({
       currentView: 'dashboard',
       activePillar: null,
+      socraticModeByPillar: {},
 
       pendingSessionPillar: null,
       activationQuizEnabled: true,
@@ -205,6 +213,24 @@ export const useAppStore = create<AppState>()(
 
       setView: (view, pillar) =>
         set({ currentView: view, activePillar: pillar ?? get().activePillar }),
+
+      toggleSocraticMode: (pillar) =>
+        set((state) => {
+          const key = socraticKey(pillar);
+          return {
+            socraticModeByPillar: {
+              ...state.socraticModeByPillar,
+              [key]: !state.socraticModeByPillar[key],
+            },
+          };
+        }),
+      setSocraticMode: (pillar, enabled) =>
+        set((state) => ({
+          socraticModeByPillar: {
+            ...state.socraticModeByPillar,
+            [socraticKey(pillar)]: enabled,
+          },
+        })),
 
       startActivation: (pillar) =>
         set({ currentView: 'activation', pendingSessionPillar: pillar }),
@@ -332,6 +358,7 @@ export const useAppStore = create<AppState>()(
         forgettingCurveSettings: state.forgettingCurveSettings,
         sidebarCollapsed: state.sidebarCollapsed,
         activePillar: state.activePillar,
+        socraticModeByPillar: state.socraticModeByPillar,
         activationQuizEnabled: state.activationQuizEnabled,
         activationQuizLength: state.activationQuizLength,
       }),

@@ -22,6 +22,17 @@ export function formatDateShort(date: Date): string {
   });
 }
 
+/** Sentinel key for the no-pillar (general) tutor context. Not a valid PillarId,
+ *  so it never collides with a real pillar in the per-pillar Socratic map. */
+export const SOCRATIC_GLOBAL_KEY = '__global__';
+
+/** Resolves the per-pillar key used to store/look up Socratic Mode state.
+ *  Single source of truth shared by useAI and the TutorChat header toggle so
+ *  the UI state and prompt behavior never key off different values. */
+export function socraticKey(pillar: PillarId | null): string {
+  return pillar ?? SOCRATIC_GLOBAL_KEY;
+}
+
 export function getPillarById(id: PillarId): Pillar {
   const pillar = PILLARS.find((p) => p.id === id);
   if (!pillar) throw new Error(`Unknown pillar: ${id}`);

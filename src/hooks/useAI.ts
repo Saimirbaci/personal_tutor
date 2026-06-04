@@ -3,7 +3,7 @@ import { useAppStore } from '@/store/appStore';
 import { tauriInvoke, tauriListen } from '@/lib/tauri';
 import { AiMessage, GapSignalKind, KnowledgeGap, PillarId } from '@/data/types';
 import { PILLARS } from '@/data/plan';
-import { getWeekNumber, truncate } from '@/lib/utils';
+import { getWeekNumber, socraticKey, truncate } from '@/lib/utils';
 import { useConversations } from './useConversations';
 
 /** Max weak areas injected into the prompt to avoid bloat. */
@@ -81,6 +81,21 @@ The roofline model reveals whether your workload is compute-bound or memory-band
 
 Use GenUI blocks liberally — every technical concept deserves a visual representation. Mix text explanation with GenUI blocks naturally. Always end with a question or next step to keep the learning momentum going.`;
 
+/** Appended to the system prompt when Socratic Mode is on for the active context.
+ *  Flips the tutor from explain-first to a retrieval-forcing, question-back style.
+ *  Strong, explicit wording so the behavior change holds across LLM providers. */
+const SOCRATIC_MODIFIER = `
+
+SOCRATIC MODE IS ON — OVERRIDE YOUR DEFAULT EXPLAIN-FIRST STYLE.
+Your goal this session is to force *retrieval*, not recognition. Make the student do the cognitive work:
+- Respond PRIMARILY with probing questions that pull the answer out of the student (e.g. "In your own words, why does multi-head attention outperform single-head?").
+- Do NOT hand over a direct explanation until the student has actually attempted an answer. If they're stuck, give a small hint or a narrower sub-question — not the full answer.
+- Ask ONE focused question at a time. Wait for the student's response before moving on.
+- Only AFTER the student responds: briefly confirm what's right, correct what's wrong, then deepen with the next question.
+- Keep your turns short. Resist long expositions — a paragraph of explanation is a failure of this mode.
+- You MAY still emit GenUI quiz/flashcard blocks to drive recall, but bias away from lengthy diagram/code dumps.
+- If the student explicitly asks for a straight explanation, give a concise one, then immediately return to question-back mode.`;
+
 /** Builds a concise "KNOWN WEAK AREAS" section for the active pillar's top gaps. */
 function buildWeakAreasSection(pillar: PillarId, gaps: KnowledgeGap[]): string {
   const pillarGaps = gaps
@@ -107,7 +122,11 @@ function buildWeakAreasSection(pillar: PillarId, gaps: KnowledgeGap[]): string {
   );
 }
 
-function buildContextualSystemPrompt(pillar: PillarId | null, gaps: KnowledgeGap[] = []): string {
+function buildContextualSystemPrompt(
+  pillar: PillarId | null,
+  gaps: KnowledgeGap[] = [],
+  socratic = false
+): string {
   const week = getWeekNumber();
   let contextAddon = '';
 
@@ -119,6 +138,10 @@ function buildContextualSystemPrompt(pillar: PillarId | null, gaps: KnowledgeGap
     }
   } else {
     contextAddon = `\n\nCurrent week: Week ${week} of 12`;
+  }
+
+  if (socratic) {
+    contextAddon += SOCRATIC_MODIFIER;
   }
 
   return SYSTEM_PROMPT + contextAddon;
@@ -137,6 +160,7 @@ export function useAI() {
     clearMessages,
     activeConversationId,
     knowledgeGaps,
+    socraticModeByPillar,
   } = useAppStore();
 
   const { persistMessage } = useConversations();
@@ -217,9 +241,12 @@ export function useAI() {
       unlistenDoneRef.current = unlistenDone;
       unlistenErrorRef.current = unlistenError;
 
+      const resolvedPillar = contextPillar ?? activePillar;
+      const socraticEnabled = !!socraticModeByPillar[socraticKey(resolvedPillar)];
       const systemPrompt = buildContextualSystemPrompt(
-        contextPillar ?? activePillar,
-        knowledgeGaps ?? []
+        resolvedPillar,
+        knowledgeGaps ?? [],
+        socraticEnabled
       );
 
       const backendMessages = messages
@@ -244,7 +271,7 @@ export function useAI() {
       }
     },
     [messages, isStreaming, providerConfig, activePillar, activeConversationId,
-     knowledgeGaps, addMessage, appendToken, finalizeStream, startStream, persistMessage]
+     knowledgeGaps, socraticModeByPillar, addMessage, appendToken, finalizeStream, startStream, persistMessage]
   );
 
   return {
