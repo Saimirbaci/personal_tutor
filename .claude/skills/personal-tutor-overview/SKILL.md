@@ -162,7 +162,7 @@ review_items   (item_id, item_type, pillar, ease_factor, interval_days, repetiti
 
 ## Zustand Store Structure (`appStore.ts`)
 
-**Persisted** (survive app restart): `providerConfig`, `voiceConfig`, `sidebarCollapsed`, `activePillar`
+**Persisted** (survive app restart): `providerConfig`, `voiceConfig`, `sidebarCollapsed`, `activePillar`, `socraticModeByPillar`
 
 **Ephemeral** (lost on restart): `messages`, `isStreaming`, `streamingContent`, `currentToken`, `activeConversationId`, `conversationList`, `progress`, `streak`
 

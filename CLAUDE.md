@@ -73,10 +73,18 @@ All AI responses stream via Tauri events — never polled:
 
 The `useAI` hook in `src/hooks/useAI.ts` handles event subscriptions and calls the `stream_chat` Tauri command.
 
+## Socratic Mode
+Per-pillar toggle that switches the tutor from explain-first to retrieval-forcing, question-back pedagogy. Frontend-only (no backend changes).
+- Store state: `socraticModeByPillar: Record<string, boolean>` keyed by `PillarId` or `'__global__'` for general context. Persisted.
+- Helpers: `src/lib/utils.ts` exports `SOCRATIC_GLOBAL_KEY` and `socraticKey(pillar)` — single source of truth for key derivation.
+- Prompt: `useAI.ts` appends `SOCRATIC_MODIFIER` to the system prompt when mode is on for the resolved pillar context.
+- UI: `TutorChat` header toggle (MessageCircleQuestion icon) calls `toggleSocraticMode(selectedPillar)`.
+
 ## State Management
 Single Zustand store in `src/store/appStore.ts` with `persist` middleware.
-Persisted keys: `providerConfig`, `voiceConfig`, `sidebarCollapsed`, `activePillar`.
+Persisted keys: `providerConfig`, `voiceConfig`, `forgettingCurveSettings`, `sidebarCollapsed`, `activePillar`, `socraticModeByPillar`, `activationQuizEnabled`, `activationQuizLength`.
 Ephemeral: all messages, streaming state, conversation list, progress data, `pillarDrift`, `planAdjustments`, `pendingPrompt` (NOT persisted).
+Actions: `toggleSocraticMode(pillar)`, `setSocraticMode(pillar, enabled)` for per-pillar Socratic toggle.
 
 ## Database (rusqlite)
 SQLite at `{app_data_dir}/tutor.db`. WAL mode, foreign keys ON.

@@ -42,11 +42,14 @@ interface AppState {
   sidebarCollapsed: boolean;
   mobileSidebarOpen: boolean;
   logSessionModalOpen: boolean;
+
+  // Socratic Mode (per-pillar)
+  socraticModeByPillar: Record<string, boolean>;  // keyed by PillarId or '__global__'
 }
 ```
 
 ### Persisted Keys (survive app restart)
-`providerConfig` | `voiceConfig` | `sidebarCollapsed` | `activePillar`
+`providerConfig` | `voiceConfig` | `sidebarCollapsed` | `activePillar` | `socraticModeByPillar`
 
 All other state is ephemeral — reset on app start.
 
@@ -75,6 +78,8 @@ finalizeStream()               // parses GenUI, creates AiMessage, clears stream
 clearMessages()                // reset conversation display
 setActiveConversation(id)      // track which conversation is open
 upsertConversation(summary)    // update or prepend to sidebar list
+toggleSocraticMode(pillar)     // flip Socratic flag for pillar (or '__global__' when null)
+setSocraticMode(pillar, bool)  // set Socratic flag explicitly
 ```
 
 ---
@@ -135,6 +140,8 @@ export function useProgress() {
 ```
 
 Existing hooks: `useAI`, `useVoice`, `useProgress` — extend these before creating new ones.
+
+**Socratic Mode wiring**: `useAI.sendMessage` resolves the active pillar, looks up `socraticModeByPillar[socraticKey(pillar)]` (where `socraticKey` from `src/lib/utils.ts` maps `null` to `'__global__'`), and passes the flag to `buildContextualSystemPrompt` which appends `SOCRATIC_MODIFIER` when true.
 
 ---
 
