@@ -12,8 +12,10 @@ import {
   PlanAdjustment,
   ProgressData,
   ProviderConfig,
+  QuizMode,
   ReviewItem,
   VoiceConfig,
+  VoiceQuizState,
   WeeklyDigest,
 } from '@/data/types';
 import { socraticKey } from '@/lib/utils';
@@ -107,6 +109,12 @@ interface AppState {
   // Voice
   voiceConfig: VoiceConfig;
 
+  // Voice Quiz Mode (ephemeral — a live hands-free drill, never persisted).
+  // `quizMode` is the raw mode flag; `voiceQuizState` is the current loop phase.
+  // No derived data lives here — the orchestration hook owns the loop logic.
+  quizMode: QuizMode;
+  voiceQuizState: VoiceQuizState;
+
   // Forgetting-curve notifications
   forgettingCurveSettings: ForgettingCurveSettings;
 
@@ -152,6 +160,8 @@ interface AppState {
   setLogSessionModal: (open: boolean) => void;
   setVoiceConfig: (c: Partial<VoiceConfig>) => void;
   setForgettingCurveSettings: (c: Partial<ForgettingCurveSettings>) => void;
+  setQuizMode: (mode: QuizMode) => void;
+  setVoiceQuizState: (state: VoiceQuizState) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -204,6 +214,9 @@ export const useAppStore = create<AppState>()(
         elevenLabsApiKey: '',
         elevenLabsVoiceId: 'EXAVITQu4vr4xnSDxMaL', // "Sarah" — good default
       },
+
+      quizMode: 'off',
+      voiceQuizState: 'idle',
 
       forgettingCurveSettings: DEFAULT_FORGETTING_CURVE_SETTINGS,
 
@@ -349,6 +362,9 @@ export const useAppStore = create<AppState>()(
         set((state) => ({
           forgettingCurveSettings: { ...state.forgettingCurveSettings, ...c },
         })),
+      setQuizMode: (mode) =>
+        set({ quizMode: mode, voiceQuizState: 'idle' }),
+      setVoiceQuizState: (voiceQuizState) => set({ voiceQuizState }),
     }),
     {
       name: 'personal-tutor-store',
