@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { PanelLeft, Plus, Trash2, Pencil, Check, X, MessageSquare, FileText, ArrowRight, CheckCircle2, MessageCircleQuestion } from 'lucide-react';
+import { PanelLeft, Plus, Trash2, Pencil, Check, X, MessageSquare, FileText, ArrowRight, CheckCircle2, MessageCircleQuestion, Headphones } from 'lucide-react';
 import { tauriInvoke } from '@/lib/tauri';
 import { useAppStore } from '@/store/appStore';
 import { useAI } from '@/hooks/useAI';
@@ -19,6 +19,7 @@ import MessageBubble from './MessageBubble';
 import InputBar from './InputBar';
 import MarkdownContent from './MarkdownContent';
 import DepthIndicator from './DepthIndicator';
+import VoiceQuizPanel from './VoiceQuizPanel';
 
 /** Compact depth info kept per conversation for the sidebar index. */
 interface DepthSummary {
@@ -205,6 +206,8 @@ export default function TutorChat() {
   const { voiceConfig } = useAppStore((s) => ({ voiceConfig: s.voiceConfig }));
   const socraticModeByPillar = useAppStore((s) => s.socraticModeByPillar);
   const toggleSocraticMode = useAppStore((s) => s.toggleSocraticMode);
+  const quizMode = useAppStore((s) => s.quizMode);
+  const setQuizMode = useAppStore((s) => s.setQuizMode);
   const isMobile = useMobile();
 
   const [selectedPillar, setSelectedPillar] = useState<PillarId | null>(activePillar);
@@ -356,10 +359,12 @@ export default function TutorChat() {
     createConversation,
   ]);
 
-  // TTS: auto-speak the last assistant message when streaming finishes
+  // TTS: auto-speak the last assistant message when streaming finishes.
+  // Suppressed during Voice Quiz Mode — that loop drives its own TTS so the
+  // question/verdict aren't spoken twice.
   useEffect(() => {
     if (prevStreamingRef.current && !isStreaming) {
-      if (voiceConfig.ttsEnabled && voiceConfig.elevenLabsApiKey) {
+      if (quizMode !== 'voice' && voiceConfig.ttsEnabled && voiceConfig.elevenLabsApiKey) {
         const last = messages[messages.length - 1];
         if (last?.role === 'assistant' && last.content) {
           // Speak at most first 500 chars to keep it concise
@@ -606,7 +611,16 @@ export default function TutorChat() {
       </AnimatePresence>
 
       {/* ── Main chat area ───────────────────────────────────────────────── */}
-      <div className="flex flex-col flex-1 min-w-0 h-full">
+      <div className="relative flex flex-col flex-1 min-w-0 h-full">
+        {/* Voice Quiz Mode — hands-free overlay driven by useVoiceQuiz */}
+        <AnimatePresence>
+          {quizMode === 'voice' && (
+            <VoiceQuizPanel
+              pillar={selectedPillar}
+              onExit={() => setQuizMode('off')}
+            />
+          )}
+        </AnimatePresence>
         {/* Header */}
         <div className="flex items-center gap-2 px-3 md:px-4 py-2.5 border-b border-[#1a2540] flex-shrink-0 min-w-0">
           {/* Sidebar toggle */}
@@ -661,6 +675,27 @@ export default function TutorChat() {
             }`}
           >
             <MessageCircleQuestion size={13} />
+          </button>
+
+          {/* Voice Quiz Mode toggle — hands-free spoken drill. Gated on voice
+              being enabled; disabled with a Settings hint otherwise. */}
+          <button
+            onClick={() => voiceConfig.enabled && setQuizMode(quizMode === 'voice' ? 'off' : 'voice')}
+            disabled={!voiceConfig.enabled}
+            title={
+              !voiceConfig.enabled
+                ? 'Enable voice in Settings to use Voice Quiz Mode'
+                : quizMode === 'voice'
+                  ? 'Voice Quiz Mode ON — tap to exit the hands-free drill'
+                  : 'Voice Quiz Mode — hands-free spoken active recall'
+            }
+            className={`flex-shrink-0 p-1.5 rounded-lg border transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+              quizMode === 'voice'
+                ? 'border-[#C9A84C] text-[#C9A84C] bg-[#C9A84C]/10'
+                : 'border-[#1a2540] text-[#4a5568] hover:text-[#e2e8f0] hover:border-[#4a5568]'
+            }`}
+          >
+            <Headphones size={13} />
           </button>
 
           <button

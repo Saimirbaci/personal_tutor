@@ -38,6 +38,8 @@ export function useVoice(): UseVoiceReturn {
 
   // TTS playback ref (so we can cancel)
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  // Resolver for the in-flight speak() promise, so cancelSpeak() can settle it.
+  const speakResolveRef = useRef<(() => void) | null>(null);
 
   // ── Recording ─────────────────────────────────────────────────────────────
 
@@ -130,11 +132,17 @@ export function useVoice(): UseVoiceReturn {
 
   // ── TTS ───────────────────────────────────────────────────────────────────
 
+  // speak() resolves when playback FINISHES (ended/error/cancel), so callers
+  // that need to sequence speech (e.g. the voice-quiz loop: speak the question,
+  // THEN start recording) can `await speak(...)`. Fire-and-forget callers that
+  // don't await are unaffected.
   const speak = useCallback(
-    async (text: string) => {
+    async (text: string): Promise<void> => {
       if (!voiceConfig.ttsEnabled || !voiceConfig.elevenLabsApiKey) return;
 
-      // Cancel previous playback
+      // Cancel previous playback (settling any in-flight speak promise first).
+      speakResolveRef.current?.();
+      speakResolveRef.current = null;
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current = null;
@@ -157,22 +165,28 @@ export function useVoice(): UseVoiceReturn {
         const audio = new Audio(url);
         audioRef.current = audio;
 
-        audio.onended = () => {
-          URL.revokeObjectURL(url);
-          audioRef.current = null;
-          setState('idle');
-        };
-        audio.onerror = () => {
-          URL.revokeObjectURL(url);
-          audioRef.current = null;
-          setState('idle');
-        };
-
-        await audio.play();
+        await new Promise<void>((resolve) => {
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            URL.revokeObjectURL(url);
+            if (audioRef.current === audio) audioRef.current = null;
+            speakResolveRef.current = null;
+            setState('idle');
+            resolve();
+          };
+          // Allow cancelSpeak() / a new speak() to settle this playback early.
+          speakResolveRef.current = finish;
+          audio.onended = finish;
+          audio.onerror = finish;
+          audio.play().catch(finish);
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         setError(msg);
         setState('error');
+        speakResolveRef.current = null;
       }
     },
     [voiceConfig.ttsEnabled, voiceConfig.elevenLabsApiKey, voiceConfig.elevenLabsVoiceId]
@@ -182,8 +196,11 @@ export function useVoice(): UseVoiceReturn {
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current = null;
-      setState('idle');
     }
+    // Settle any awaiting speak() promise so a sequenced loop isn't left hanging.
+    speakResolveRef.current?.();
+    speakResolveRef.current = null;
+    setState('idle');
   }, []);
 
   // ── Model management ──────────────────────────────────────────────────────

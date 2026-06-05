@@ -200,6 +200,36 @@ export interface ElevenLabsVoice {
   category: string;
 }
 
+// ── Voice Quiz Mode ────────────────────────────────────────────────────────────
+
+/** Whether the tutor is running a hands-free quiz drill. Ephemeral (never
+ *  persisted). Extensible to a future 'text' mode. */
+export type QuizMode = 'off' | 'voice';
+
+/** Phase of the hands-free voice quiz loop:
+ *  idle        — not running (or finished)
+ *  asking      — generating + speaking the question (TTS)
+ *  listening   — recording the spoken answer (STT capture)
+ *  transcribing— turning the recorded audio into text
+ *  grading     — AI is scoring the spoken answer
+ *  feedback    — speaking the verdict back (TTS)
+ *  error       — something failed (mic/STT/TTS/config) */
+export type VoiceQuizState =
+  | 'idle'
+  | 'asking'
+  | 'listening'
+  | 'transcribing'
+  | 'grading'
+  | 'feedback'
+  | 'error';
+
+/** Parsed result of grading a spoken answer. `quality` is the SM-2 grade (0–5);
+ *  `spokenText` is the verdict to read aloud (machine markers stripped). */
+export interface VoiceQuizGrade {
+  quality: number;
+  spokenText: string;
+}
+
 // ── Listen Mode (Audio Lessons) ────────────────────────────────────────────────
 
 /** A generated podcast-style audio lesson. Mirrors the Rust `AudioLesson`
