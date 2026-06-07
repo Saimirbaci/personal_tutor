@@ -14,6 +14,7 @@ import {
   ProviderConfig,
   QuizMode,
   ReviewItem,
+  StreakState,
   VoiceConfig,
   VoiceQuizState,
   WeeklyDigest,
@@ -88,6 +89,9 @@ interface AppState {
   // Progress
   progress: ProgressData | null;
   streak: number;
+  // Momentum streak snapshot (freeze tokens, frozen days, recovery). Ephemeral —
+  // loaded from the backend, never persisted.
+  streakState: StreakState | null;
 
   // Weekly digests (ephemeral — loaded from backend, never persisted)
   weeklyDigests: WeeklyDigest[];
@@ -145,6 +149,7 @@ interface AppState {
   endReviewSession: () => void;
   setProgress: (p: ProgressData) => void;
   setStreak: (s: number) => void;
+  setStreakState: (s: StreakState | null) => void;
   setWeeklyDigests: (d: WeeklyDigest[]) => void;
   setSelectedDigestWeek: (weekStart: string | null) => void;
   setMasteryScores: (scores: MasteryScore[]) => void;
@@ -194,6 +199,7 @@ export const useAppStore = create<AppState>()(
 
       progress: null,
       streak: 0,
+      streakState: null,
       learningVelocity: null,
       effortMatrix: null,
 
@@ -337,6 +343,7 @@ export const useAppStore = create<AppState>()(
 
       setProgress: (p) => set({ progress: p }),
       setStreak: (s) => set({ streak: s }),
+      setStreakState: (s) => set({ streakState: s }),
       setWeeklyDigests: (d) => set({ weeklyDigests: d }),
       setSelectedDigestWeek: (weekStart) => set({ selectedDigestWeek: weekStart }),
       setMasteryScores: (scores) =>

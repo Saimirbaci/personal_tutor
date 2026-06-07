@@ -10,6 +10,7 @@ import PillarProgress from './PillarProgress';
 import StreakWidget from './StreakWidget';
 import ReviewWidget from './ReviewWidget';
 import DriftCatchUpCard from './DriftCatchUpCard';
+import RecoveryBanner from './RecoveryBanner';
 import ForgettingCurveCard from './ForgettingCurveCard';
 
 export default function Dashboard() {
@@ -56,6 +57,15 @@ export default function Dashboard() {
               Jump In — {currentBlock.emoji} {currentBlock.pillar.charAt(0).toUpperCase() + currentBlock.pillar.slice(1)}
             </button>
           )}
+        </motion.div>
+
+        {/* Streak recovery offer (hidden unless a missed day is recoverable) */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.03 }}
+        >
+          <RecoveryBanner />
         </motion.div>
 
         {/* Drift catch-up surface (hidden when nothing is drifting) */}

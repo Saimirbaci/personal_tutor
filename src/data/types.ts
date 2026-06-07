@@ -80,6 +80,29 @@ export interface ProgressData {
   milestones: MilestoneStatus[];
 }
 
+/** Lifecycle status of the momentum streak. */
+export type StreakStatus = 'active' | 'at_risk' | 'recovery' | 'broken';
+
+/** A pending partial-restore offer surfaced after a single missed day. */
+export interface RecoveryState {
+  missedDate: string;
+  priorStreak: number;
+  restoreTo: number;
+  expiresAt: string;
+}
+
+/** Full streak snapshot (mirrors Rust `streak::StreakState`). */
+export interface StreakState {
+  current: number;
+  best: number;
+  freezeTokens: number;
+  freezeUsedThisWeek: boolean;
+  /** ISO dates (YYYY-MM-DD) bridged by a freeze token. */
+  frozenDays: string[];
+  status: StreakStatus;
+  recovery: RecoveryState | null;
+}
+
 export interface AiMessage {
   id: string;
   role: 'user' | 'assistant';

@@ -191,6 +191,33 @@ pub fn init(app: &AppHandle) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_conversation_depth_created
             ON conversation_depth(created_at);
+
+        CREATE TABLE IF NOT EXISTS streak_freezes (
+            id            TEXT PRIMARY KEY,
+            kind          TEXT NOT NULL,
+            event_date    TEXT NOT NULL,
+            week_start    TEXT NOT NULL,
+            bridged_date  TEXT,
+            note          TEXT NOT NULL DEFAULT '',
+            created_at    TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_streak_freezes_week
+            ON streak_freezes(week_start);
+
+        CREATE TABLE IF NOT EXISTS streak_recovery (
+            id            TEXT PRIMARY KEY,
+            missed_date   TEXT NOT NULL,
+            prior_streak  INTEGER NOT NULL,
+            restore_to    INTEGER NOT NULL,
+            status        TEXT NOT NULL DEFAULT 'pending',
+            expires_at    TEXT NOT NULL,
+            created_at    TEXT NOT NULL,
+            resolved_at   TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_streak_recovery_status
+            ON streak_recovery(status, missed_date);
         ",
     )?;
 
