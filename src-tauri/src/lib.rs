@@ -5,7 +5,7 @@ pub mod db;
 use commands::{
     activation, ai as ai_cmd, analytics, conversations as conv_cmd, depth, digest as digest_cmd,
     gaps, listen, mastery, progress, rebalance, review, schedule, source as source_cmd,
-    summaries as summary_cmd, sync_server as sync_cmd, voice as voice_cmd,
+    streak, summaries as summary_cmd, sync_server as sync_cmd, voice as voice_cmd,
 };
 use sync_cmd::SyncServerHandle;
 use tauri::Manager;
@@ -40,6 +40,9 @@ pub fn run() {
             progress::get_progress,
             progress::get_streak,
             progress::update_milestone,
+            streak::get_streak_state,
+            streak::start_streak_recovery,
+            streak::complete_streak_recovery,
             review::record_review_attempt,
             review::get_due_reviews,
             review::get_review_counts,

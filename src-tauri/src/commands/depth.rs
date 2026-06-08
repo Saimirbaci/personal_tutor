@@ -225,6 +225,13 @@ pub fn save_conversation_depth(
         message_count.unwrap_or(0),
         &now,
     )?;
+
+    // Best-effort: a deep session earns a weekly streak-freeze token. Never let
+    // a token-award failure fail depth scoring.
+    if parsed.score >= crate::commands::streak::DEEP_SESSION_THRESHOLD {
+        let _ = crate::commands::streak::maybe_award_freeze_token(&conn, Local::now().date_naive());
+    }
+
     read_depth(&conn, &conversation_id)?
         .ok_or_else(|| "Depth row not found after save".to_string())
 }
