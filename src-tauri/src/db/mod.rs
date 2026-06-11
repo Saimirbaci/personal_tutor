@@ -218,6 +218,23 @@ pub fn init(app: &AppHandle) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_streak_recovery_status
             ON streak_recovery(status, missed_date);
+
+        CREATE TABLE IF NOT EXISTS commitments (
+            id                TEXT PRIMARY KEY,
+            commitment        TEXT NOT NULL,
+            pillar            TEXT NOT NULL,
+            due_date          TEXT NOT NULL,
+            status            TEXT NOT NULL DEFAULT 'active',
+            created_at        TEXT NOT NULL,
+            reminder_sent_at  TEXT,
+            calendar_event_id TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_commitments_due
+            ON commitments(due_date);
+
+        CREATE INDEX IF NOT EXISTS idx_commitments_status
+            ON commitments(status, due_date);
         ",
     )?;
 
@@ -236,6 +253,18 @@ fn run_migrations(conn: &Connection) -> Result<()> {
         "review_items",
         "last_notified_at",
         "ALTER TABLE review_items ADD COLUMN last_notified_at TEXT",
+    )?;
+    add_column_if_missing(
+        conn,
+        "commitments",
+        "reminder_sent_at",
+        "ALTER TABLE commitments ADD COLUMN reminder_sent_at TEXT",
+    )?;
+    add_column_if_missing(
+        conn,
+        "commitments",
+        "calendar_event_id",
+        "ALTER TABLE commitments ADD COLUMN calendar_event_id TEXT",
     )?;
     Ok(())
 }
