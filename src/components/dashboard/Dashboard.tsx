@@ -12,6 +12,7 @@ import ReviewWidget from './ReviewWidget';
 import DriftCatchUpCard from './DriftCatchUpCard';
 import RecoveryBanner from './RecoveryBanner';
 import ForgettingCurveCard from './ForgettingCurveCard';
+import CommitmentStrip from './CommitmentStrip';
 
 export default function Dashboard() {
   const { currentBlock, todaySchedule } = usePlan();
@@ -75,6 +76,15 @@ export default function Dashboard() {
           transition={{ duration: 0.3, delay: 0.04 }}
         >
           <DriftCatchUpCard />
+        </motion.div>
+
+        {/* Commitment contracts strip */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.045 }}
+        >
+          <CommitmentStrip />
         </motion.div>
 
         {/* Today's schedule */}

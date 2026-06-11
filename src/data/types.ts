@@ -630,6 +630,29 @@ export interface SourceSummary {
   teachingBrief?: string | null;
 }
 
+// ── Commitment Contracts & Accountability ────────────────────────────────────
+
+/** Lifecycle of a learning commitment. Must stay in sync with the Rust
+ *  `VALID_STATUSES` list in `commands/commitments.rs`. */
+export type CommitmentStatus = 'active' | 'completed' | 'missed' | 'rescheduled';
+
+/** An explicit learning pledge ("I will complete LLM week-3 by Friday").
+ *  Mirrors the Rust `Commitment` serde struct (camelCase). */
+export interface Commitment {
+  id: string;
+  /** The pledge text itself. */
+  commitment: string;
+  pillar: PillarId;
+  /** Local calendar due day, YYYY-MM-DD. */
+  dueDate: string;
+  status: CommitmentStatus;
+  createdAt: string;
+  /** Set once the evening-before reminder fired (dedupe marker). */
+  reminderSentAt?: string | null;
+  /** Synthetic marker when a calendar focus block was requested. */
+  calendarEventId?: string | null;
+}
+
 // ── Knowledge Gaps ────────────────────────────────────────────────────────────
 
 export type GapSignalKind = 'weak_quiz' | 'low_ease' | 'shallow_chat' | 'stale';

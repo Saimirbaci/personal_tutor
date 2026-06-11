@@ -7,6 +7,7 @@ import { parseGenUIBlocks } from '@/lib/utils';
 import MarkdownContent from '@/components/tutor/MarkdownContent';
 import GenUIRenderer from '@/components/tutor/genui';
 import { WeeklyDigest } from '@/data/types';
+import MissedCommitments from './MissedCommitments';
 
 function formatDay(iso: string): string {
   return new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, {
@@ -156,6 +157,9 @@ export default function WeeklyDigestCard() {
           “Generate this week” to create one now.
         </p>
       )}
+
+      {/* Missed commitments — shown alongside the digest regardless of week */}
+      <MissedCommitments />
     </motion.div>
   );
 }
