@@ -120,7 +120,8 @@ export interface GenUIBlock {
     | 'concept-map'
     | 'timeline'
     | 'key-insight'
-    | 'session-summary';
+    | 'session-summary'
+    | 'connection';
   data: unknown;
 }
 
@@ -628,6 +629,42 @@ export interface SourceSummary {
   truncated: boolean;
   /** Optional AI-drafted teaching brief (only when requested). */
   teachingBrief?: string | null;
+}
+
+// ── Cross-Pillar Connections ───────────────────────────────────────────────────
+
+/** A pre-mapped semantic link between two pillars in the static graph.
+ *  Undirected — `a` and `b` are interchangeable. */
+export interface PillarConnection {
+  a: PillarId;
+  b: PillarId;
+  /** Short relationship label, e.g. "Deploying & serving models". */
+  label: string;
+  /** One-sentence "why these connect" rationale. */
+  rationale: string;
+  /** Relationship strength, 0–1 (higher = tighter coupling). */
+  weight: number;
+}
+
+/** Where a surfaced connection came from. `both` = static pair the learner
+ *  also recently touched dynamically. */
+export type ConnectionSource = 'static' | 'dynamic' | 'both';
+
+/** The rendered inline callout payload. Mirrors the Rust `ConnectionCallout`
+ *  serde struct (camelCase). Also the JSON inside a
+ *  `<genui type="connection">` block. */
+export interface ConnectionCallout {
+  fromPillar: PillarId;
+  toPillar: PillarId;
+  label: string;
+  rationale: string;
+  source: ConnectionSource;
+  /** "covered last week" style evidence line, when available. */
+  recentEvidence?: string | null;
+  /** Related conversation to deep-link into, when available. */
+  conversationId?: string | null;
+  /** Combined ranking score (higher = surface first). */
+  score: number;
 }
 
 // ── Knowledge Gaps ────────────────────────────────────────────────────────────

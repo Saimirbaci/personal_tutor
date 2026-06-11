@@ -3,11 +3,14 @@ import { useAppStore } from '@/store/appStore';
 import { tauriInvoke, tauriListen } from '@/lib/tauri';
 import { AiMessage, GapSignalKind, KnowledgeGap, PillarId } from '@/data/types';
 import { PILLARS } from '@/data/plan';
+import { connectionsForPillar } from '@/data/pillarConnections';
 import { getWeekNumber, socraticKey, truncate } from '@/lib/utils';
 import { useConversations } from './useConversations';
 
 /** Max weak areas injected into the prompt to avoid bloat. */
 const MAX_WEAK_AREAS = 3;
+/** Max cross-pillar connection hints injected into the prompt. */
+const MAX_CONNECTION_HINTS = 3;
 /** Only surface gaps at/above this severity so the tutor isn't naggy. */
 const WEAK_AREA_MIN_SEVERITY = 0.35;
 
@@ -122,6 +125,27 @@ function buildWeakAreasSection(pillar: PillarId, gaps: KnowledgeGap[]): string {
   );
 }
 
+/** Builds a "RELATED PILLARS" hint section from the static connection graph so
+ *  the tutor can weave cross-pillar links into its teaching narratively. */
+function buildConnectionsSection(pillar: PillarId): string {
+  const links = connectionsForPillar(pillar).slice(0, MAX_CONNECTION_HINTS);
+  if (links.length === 0) return '';
+
+  const lines = links
+    .map((l) => {
+      const other = PILLARS.find((p) => p.id === l.other);
+      const name = other ? other.name : l.other;
+      return `- ${name}: ${l.label} — ${l.rationale}`;
+    })
+    .join('\n');
+
+  return (
+    `\n\nRELATED PILLARS (pre-mapped connections to this focus area):\n${lines}\n\n` +
+    `When a concept naturally bridges into one of these areas, briefly call out the ` +
+    `connection so the student builds an integrated mental model — don't force it.`
+  );
+}
+
 function buildContextualSystemPrompt(
   pillar: PillarId | null,
   gaps: KnowledgeGap[] = [],
@@ -135,6 +159,7 @@ function buildContextualSystemPrompt(
     if (pillarInfo) {
       contextAddon = `\n\nCURRENT FOCUS: ${pillarInfo.emoji} ${pillarInfo.name}\nCurrent week: Week ${week} of 12\nDescription: ${pillarInfo.description}\n\nTailor your teaching and GenUI blocks to this pillar's specific concepts.`;
       contextAddon += buildWeakAreasSection(pillar, gaps);
+      contextAddon += buildConnectionsSection(pillar);
     }
   } else {
     contextAddon = `\n\nCurrent week: Week ${week} of 12`;
