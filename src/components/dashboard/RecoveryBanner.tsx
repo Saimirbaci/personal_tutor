@@ -13,6 +13,7 @@ import { useProgress } from '@/hooks/useProgress';
 export default function RecoveryBanner() {
   const streakState = useAppStore((s) => s.streakState);
   const setPendingPrompt = useAppStore((s) => s.setPendingPrompt);
+  const setRecoveryCatchUpActive = useAppStore((s) => s.setRecoveryCatchUpActive);
   const setView = useAppStore((s) => s.setView);
   const { startRecovery } = useProgress();
   const navigate = useNavigate();
@@ -24,6 +25,9 @@ export default function RecoveryBanner() {
     const seed = await startRecovery();
     if (seed) {
       setPendingPrompt(seed, true);
+      // Arm the catch-up: the tutor restores the streak once this session is
+      // genuinely engaged with (see TutorChat's recovery-completion effect).
+      setRecoveryCatchUpActive(true);
       setView('tutor');
       navigate('/tutor');
     }

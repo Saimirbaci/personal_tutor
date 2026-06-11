@@ -78,6 +78,11 @@ interface AppState {
   // When true, the queued prompt should open in a brand-new conversation
   // (e.g. a spaced-review drill) rather than the resumed last one.
   pendingPromptFresh: boolean;
+  // True while a streak-recovery catch-up is in progress (set when the user
+  // starts the catch-up from the RecoveryBanner). The tutor calls
+  // `complete_streak_recovery` once that catch-up session is genuinely engaged
+  // with, then clears this. Ephemeral — never persisted.
+  recoveryCatchUpActive: boolean;
 
   // Spaced-review session (ephemeral, never persisted). When the user starts a
   // batch review, the due items are queued here and drilled ONE AT A TIME in the
@@ -144,6 +149,7 @@ interface AppState {
   upsertConversation: (summary: ConversationListEntry) => void;
   removeConversation: (id: string) => void;
   setPendingPrompt: (prompt: string | null, fresh?: boolean) => void;
+  setRecoveryCatchUpActive: (active: boolean) => void;
   beginReviewSession: (items: ReviewItem[]) => void;
   advanceReviewSession: () => ReviewItem | null;
   endReviewSession: () => void;
@@ -193,6 +199,7 @@ export const useAppStore = create<AppState>()(
       conversationList: [],
       pendingPrompt: null,
       pendingPromptFresh: false,
+      recoveryCatchUpActive: false,
 
       reviewQueue: [],
       reviewCursor: 0,
@@ -324,6 +331,7 @@ export const useAppStore = create<AppState>()(
         })),
       setPendingPrompt: (prompt, fresh = false) =>
         set({ pendingPrompt: prompt, pendingPromptFresh: prompt ? fresh : false }),
+      setRecoveryCatchUpActive: (active) => set({ recoveryCatchUpActive: active }),
 
       beginReviewSession: (items) => set({ reviewQueue: items, reviewCursor: 0 }),
       // Advance to the next queued item and return it (null when the queue is

@@ -10,6 +10,7 @@ import { useVoice } from '@/hooks/useVoice';
 import SummaryCard from '@/components/SummaryCard';
 import { useMobile } from '@/hooks/useMobile';
 import { runDepthScore } from '@/hooks/useDepthScore';
+import { useProgress } from '@/hooks/useProgress';
 import { PILLARS, PLAN } from '@/data/plan';
 import { PillarId, CurriculumItem, ConversationDepth } from '@/data/types';
 import { singleReviewPrompt } from '@/lib/reviewPrompts';
@@ -177,6 +178,7 @@ export default function TutorChat() {
     reviewCursor,
     advanceReviewSession,
     endReviewSession,
+    setRecoveryCatchUpActive,
   } = useAppStore((s) => ({
     messages: s.messages,
     isStreaming: s.isStreaming,
@@ -192,6 +194,7 @@ export default function TutorChat() {
     reviewCursor: s.reviewCursor,
     advanceReviewSession: s.advanceReviewSession,
     endReviewSession: s.endReviewSession,
+    setRecoveryCatchUpActive: s.setRecoveryCatchUpActive,
   }));
 
   const { sendMessage, clearMessages } = useAI();
@@ -203,6 +206,7 @@ export default function TutorChat() {
     renameConversation,
   } = useConversations();
   const { speak, state: _voiceState } = useVoice();
+  const { completeRecovery } = useProgress();
   const { voiceConfig } = useAppStore((s) => ({ voiceConfig: s.voiceConfig }));
   const socraticModeByPillar = useAppStore((s) => s.socraticModeByPillar);
   const toggleSocraticMode = useAppStore((s) => s.toggleSocraticMode);
@@ -292,6 +296,20 @@ export default function TutorChat() {
     void runSessionSummary(conversationId);
   }, []);
 
+  // Close the streak-recovery loop: when a catch-up session armed by the
+  // RecoveryBanner is genuinely engaged with (a real back-and-forth, matching
+  // the ≥4-message bar a "real session" uses for summaries), call the backend to
+  // restore the streak. Fire-and-forget and idempotent — the flag is cleared so
+  // it only fires once, and errors are swallowed by completeRecovery.
+  const maybeCompleteRecovery = useCallback(() => {
+    const state = useAppStore.getState();
+    if (!state.recoveryCatchUpActive) return;
+    if (state.isStreaming) return; // wait until the exchange settles
+    if (state.messages.length < 4) return; // not yet a real catch-up session
+    setRecoveryCatchUpActive(false);
+    void completeRecovery();
+  }, [completeRecovery, setRecoveryCatchUpActive]);
+
   // ── On mount: load conversation list and open/create the right thread ──────
   useEffect(() => {
     async function init() {
@@ -379,18 +397,20 @@ export default function TutorChat() {
   useEffect(() => {
     return () => {
       summariseSession(activeConvRef.current);
+      maybeCompleteRecovery(); // restore the streak if this was the catch-up
     };
-  }, [summariseSession]);
+  }, [summariseSession, maybeCompleteRecovery]);
 
   // ── New conversation ──────────────────────────────────────────────────────
   const handleNewConversation = useCallback(async () => {
     // Score the session we're ending before clearing it out.
     scoreConversation(activeConversationId);
     summariseSession(activeConversationId); // session ending — summarise the old one
+    maybeCompleteRecovery(); // restore the streak if this was the catch-up
     endReviewSession(); // abandon any in-progress spaced-review drill
     clearMessages();
     await createConversation(selectedPillar);
-  }, [scoreConversation, activeConversationId, clearMessages, createConversation, selectedPillar, summariseSession, endReviewSession]);
+  }, [scoreConversation, activeConversationId, clearMessages, createConversation, selectedPillar, summariseSession, maybeCompleteRecovery, endReviewSession]);
 
   // ── Switch to a conversation ──────────────────────────────────────────────
   const handleSelectConversation = useCallback(
@@ -399,13 +419,14 @@ export default function TutorChat() {
       // Score the session we're leaving before switching away.
       scoreConversation(activeConversationId);
       summariseSession(activeConversationId); // leaving the current session
+      maybeCompleteRecovery(); // restore the streak if this was the catch-up
       endReviewSession(); // leaving the review thread abandons the drill
       clearMessages();
       setActiveConversation(id);
       const msgs = await loadConversationMessages(id);
       useAppStore.setState({ messages: msgs });
     },
-    [activeConversationId, scoreConversation, clearMessages, setActiveConversation, loadConversationMessages, summariseSession, endReviewSession]
+    [activeConversationId, scoreConversation, clearMessages, setActiveConversation, loadConversationMessages, summariseSession, maybeCompleteRecovery, endReviewSession]
   );
 
   // ── Delete ────────────────────────────────────────────────────────────────

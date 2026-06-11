@@ -145,13 +145,17 @@ fn walk(
     let mut cursor = anchor;
 
     loop {
-        if sessions.contains(&cursor) {
-            if let Some((fdate, fval)) = floor {
-                if cursor == fdate {
-                    current += fval;
-                    break;
-                }
+        // A completed-recovery floor date is a terminal anchor: the streak
+        // collapses to the partial value as of that day. This fires whether or
+        // not a formal session was logged there, so a recovery restored via
+        // `complete_streak_recovery` (no fresh session) still counts.
+        if let Some((fdate, fval)) = floor {
+            if cursor == fdate {
+                current += fval;
+                break;
             }
+        }
+        if sessions.contains(&cursor) {
             current += 1;
             cursor -= Duration::days(1);
         } else if bridged.contains(&cursor) {
@@ -219,10 +223,15 @@ pub fn compute_streak_state(
 
     let today = now;
     let yesterday = now - Duration::days(1);
-    let has_today = sessions.contains(&today);
-    // A day is "covered" if it was studied or already bridged by a prior freeze.
-    let covered: std::collections::HashSet<NaiveDate> =
+    // A day is "covered" if it was studied, already bridged by a prior freeze,
+    // or pinned by a completed-recovery floor (so a restore without a freshly
+    // logged session still anchors the streak at its floor date).
+    let mut covered: std::collections::HashSet<NaiveDate> =
         sessions.union(&bridged).copied().collect();
+    if let Some((fdate, _)) = restore_floor {
+        covered.insert(fdate);
+    }
+    let has_today = covered.contains(&today);
     let yesterday_covered = covered.contains(&yesterday);
 
     // Most recent covered day (covered is non-empty since sessions is non-empty).
@@ -530,36 +539,43 @@ fn set_restore_floor(conn: &Connection, date: NaiveDate, value: i64) -> Result<(
 /// offer, auto-completion of a pending recovery once a catch-up day is logged).
 /// Idempotent: repeated calls do not double-consume tokens or re-open offers.
 fn compute_and_persist(conn: &Connection, now: NaiveDate) -> Result<StreakState, String> {
-    let sessions = load_session_dates(conn)?;
-    let bridged = load_bridged_dates(conn)?;
-    let available = held_token_balance(conn).map_err(|e| e.to_string())?;
-    let mut pending = load_pending_recovery(conn, now)?;
-    let mut floor = load_restore_floor(conn)?;
+    // Wrap the read + all side-effecting writes (recovery completion, restore
+    // floor, token consumption, recovery offer) in one transaction so a failure
+    // mid-sequence can't leave partial state. Deref coercion lets the `&Connection`
+    // helpers take `&tx`.
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+
+    let sessions = load_session_dates(&tx)?;
+    let bridged = load_bridged_dates(&tx)?;
+    let available = held_token_balance(&tx).map_err(|e| e.to_string())?;
+    let mut pending = load_pending_recovery(&tx, now)?;
+    let mut floor = load_restore_floor(&tx)?;
 
     // Auto-complete a pending recovery once the learner logs a catch-up session
     // today: honor the partial restore from today forward.
     if pending.is_some() && sessions.contains(&now) {
         let rec = pending.take().unwrap();
-        conn.execute(
+        tx.execute(
             "UPDATE streak_recovery SET status = 'completed', resolved_at = ?1 WHERE status = 'pending'",
             params![now_iso()],
         )
         .map_err(|e| e.to_string())?;
-        set_restore_floor(conn, now, rec.restore_to)?;
+        set_restore_floor(&tx, now, rec.restore_to)?;
         floor = Some((now, rec.restore_to));
     }
 
     let comp = compute_streak_state(&sessions, &bridged, available, pending.as_ref(), floor, now);
 
     for d in &comp.new_bridges {
-        insert_consumed(conn, *d, now)?;
+        insert_consumed(&tx, *d, now)?;
     }
     if let Some(offer) = &comp.offer_recovery {
         if pending.is_none() {
-            insert_recovery(conn, offer, now)?;
+            insert_recovery(&tx, offer, now)?;
         }
     }
 
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(comp.state)
 }
 
@@ -745,6 +761,29 @@ mod tests {
     }
 
     #[test]
+    fn restore_floor_anchors_streak_without_a_session_that_day() {
+        // Recovery completed today (07) WITHOUT logging a fresh session: prior
+        // sessions 03,04,05, missed 06, floor pins streak to 2 as of 07.
+        let dates = vec![d("2026-06-03"), d("2026-06-04"), d("2026-06-05")];
+        let floor = Some((d("2026-06-07"), 2));
+        let c = compute_streak_state(&dates, &[], 0, None, floor, d("2026-06-07"));
+        assert_eq!(c.state.status, "active");
+        assert_eq!(c.state.current, 2); // restored to the partial value, no churn
+        assert!(c.state.recovery.is_none());
+        assert!(c.offer_recovery.is_none()); // does NOT re-open a recovery offer
+    }
+
+    #[test]
+    fn restore_floor_continues_forward_after_restore() {
+        // Floored to 2 on 07 (no session), then a real session on 08 extends it.
+        let dates = vec![d("2026-06-03"), d("2026-06-04"), d("2026-06-05"), d("2026-06-08")];
+        let floor = Some((d("2026-06-07"), 2));
+        let c = compute_streak_state(&dates, &[], 0, None, floor, d("2026-06-08"));
+        assert_eq!(c.state.status, "active");
+        assert_eq!(c.state.current, 3); // 08 (+1) on top of the floor of 2
+    }
+
+    #[test]
     fn empty_history_is_broken_with_zero() {
         let c = compute_streak_state(&[], &[], 1, None, no_floor(), d("2026-06-07"));
         assert_eq!(c.state.current, 0);
@@ -916,5 +955,46 @@ mod tests {
         assert_eq!(s2.status, "active");
         assert_eq!(s2.current, 2); // restored to partial value
         assert!(s2.recovery.is_none());
+    }
+
+    #[test]
+    fn complete_recovery_restores_without_a_logged_session() {
+        let conn = db();
+        // Prior streak 3 (03,04,05); missed 06; today 07; no token.
+        log_session(&conn, "2026-06-03");
+        log_session(&conn, "2026-06-04");
+        log_session(&conn, "2026-06-05");
+        let now = d("2026-06-07");
+
+        // Open the recovery offer.
+        let s1 = compute_and_persist(&conn, now).unwrap();
+        assert_eq!(s1.status, "recovery");
+        let rec = s1.recovery.unwrap();
+        assert_eq!(rec.restore_to, 2);
+
+        // Simulate `complete_streak_recovery` WITHOUT logging a session today:
+        // mark the pending recovery completed and pin the restore floor at today.
+        conn.execute(
+            "UPDATE streak_recovery SET status = 'completed', resolved_at = ?1 WHERE status = 'pending'",
+            params![now_iso()],
+        )
+        .unwrap();
+        set_restore_floor(&conn, now, rec.restore_to).unwrap();
+
+        // Recompute: streak restored even though no session exists for today,
+        // and no fresh recovery offer is churned out.
+        let s2 = compute_and_persist(&conn, now).unwrap();
+        assert_eq!(s2.status, "active");
+        assert_eq!(s2.current, 2);
+        assert!(s2.recovery.is_none());
+
+        let pending: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM streak_recovery WHERE status = 'pending'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(pending, 0);
     }
 }
