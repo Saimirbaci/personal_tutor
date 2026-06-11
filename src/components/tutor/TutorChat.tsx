@@ -10,6 +10,7 @@ import { useVoice } from '@/hooks/useVoice';
 import SummaryCard from '@/components/SummaryCard';
 import { useMobile } from '@/hooks/useMobile';
 import { runDepthScore } from '@/hooks/useDepthScore';
+import { runConnectionDetection } from '@/hooks/useConnections';
 import { PILLARS, PLAN } from '@/data/plan';
 import { PillarId, CurriculumItem, ConversationDepth } from '@/data/types';
 import { singleReviewPrompt } from '@/lib/reviewPrompts';
@@ -173,6 +174,8 @@ export default function TutorChat() {
     pendingPrompt,
     pendingPromptFresh,
     setPendingPrompt,
+    pendingConversationOpen,
+    consumeConversationOpen,
     reviewQueue,
     reviewCursor,
     advanceReviewSession,
@@ -188,6 +191,8 @@ export default function TutorChat() {
     pendingPrompt: s.pendingPrompt,
     pendingPromptFresh: s.pendingPromptFresh,
     setPendingPrompt: s.setPendingPrompt,
+    pendingConversationOpen: s.pendingConversationOpen,
+    consumeConversationOpen: s.consumeConversationOpen,
     reviewQueue: s.reviewQueue,
     reviewCursor: s.reviewCursor,
     advanceReviewSession: s.advanceReviewSession,
@@ -371,6 +376,9 @@ export default function TutorChat() {
           speak(last.content.slice(0, 500));
         }
       }
+      // After a response lands, surface any cross-pillar connections inline.
+      // Fire-and-forget: idempotent, deduped, and skipped while streaming.
+      runConnectionDetection(activeConvRef.current ?? '', selectedPillar);
     }
     prevStreamingRef.current = isStreaming;
   }, [isStreaming]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -407,6 +415,18 @@ export default function TutorChat() {
     },
     [activeConversationId, scoreConversation, clearMessages, setActiveConversation, loadConversationMessages, summariseSession, endReviewSession]
   );
+
+  // ── Deep-link from a connection callout ───────────────────────────────────
+  // A cross-pillar callout's "Open that session" sets pendingConversationOpen;
+  // consume it once to switch into that thread.
+  useEffect(() => {
+    if (!pendingConversationOpen) return;
+    const target = pendingConversationOpen;
+    consumeConversationOpen();
+    if (target !== activeConversationId) {
+      handleSelectConversation(target);
+    }
+  }, [pendingConversationOpen, consumeConversationOpen, activeConversationId, handleSelectConversation]);
 
   // ── Delete ────────────────────────────────────────────────────────────────
   const handleDelete = useCallback(

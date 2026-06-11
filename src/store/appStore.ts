@@ -72,6 +72,10 @@ interface AppState {
   activeConversationId: string | null;
   conversationList: ConversationListEntry[];
 
+  // A conversation a cross-pillar callout's deep-link asked to open. Consumed
+  // once by TutorChat (loads that thread). Ephemeral, never persisted.
+  pendingConversationOpen: string | null;
+
   // A prompt queued by another view (e.g. a summary's "Reply" or a drift
   // catch-up drill) to be sent once the tutor opens. Consumed once.
   pendingPrompt: string | null;
@@ -144,6 +148,8 @@ interface AppState {
   upsertConversation: (summary: ConversationListEntry) => void;
   removeConversation: (id: string) => void;
   setPendingPrompt: (prompt: string | null, fresh?: boolean) => void;
+  requestOpenConversation: (id: string) => void;
+  consumeConversationOpen: () => void;
   beginReviewSession: (items: ReviewItem[]) => void;
   advanceReviewSession: () => ReviewItem | null;
   endReviewSession: () => void;
@@ -191,6 +197,7 @@ export const useAppStore = create<AppState>()(
 
       activeConversationId: null,
       conversationList: [],
+      pendingConversationOpen: null,
       pendingPrompt: null,
       pendingPromptFresh: false,
 
@@ -324,6 +331,8 @@ export const useAppStore = create<AppState>()(
         })),
       setPendingPrompt: (prompt, fresh = false) =>
         set({ pendingPrompt: prompt, pendingPromptFresh: prompt ? fresh : false }),
+      requestOpenConversation: (id) => set({ pendingConversationOpen: id, currentView: 'tutor' }),
+      consumeConversationOpen: () => set({ pendingConversationOpen: null }),
 
       beginReviewSession: (items) => set({ reviewQueue: items, reviewCursor: 0 }),
       // Advance to the next queued item and return it (null when the queue is
@@ -459,6 +468,13 @@ function isValidBlockData(type: string, data: unknown): boolean {
       return Array.isArray(d.events);
     case 'session-summary':
       return Array.isArray(d.takeaways) || typeof d.reflection === 'string';
+    case 'connection':
+      // Needs both pillar ends and a label to render a meaningful callout.
+      return (
+        typeof d.fromPillar === 'string' &&
+        typeof d.toPillar === 'string' &&
+        typeof d.label === 'string'
+      );
     default:
       return true;
   }

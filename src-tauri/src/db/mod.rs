@@ -218,6 +218,29 @@ pub fn init(app: &AppHandle) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_streak_recovery_status
             ON streak_recovery(status, missed_date);
+
+        CREATE TABLE IF NOT EXISTS conversation_topics (
+            conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+            pillar          TEXT,
+            topics          TEXT NOT NULL DEFAULT '[]',
+            model           TEXT,
+            updated_at      TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_conversation_topics_pillar
+            ON conversation_topics(pillar);
+
+        CREATE TABLE IF NOT EXISTS pillar_connections_seen (
+            conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            from_pillar     TEXT NOT NULL,
+            to_pillar       TEXT NOT NULL,
+            status          TEXT NOT NULL DEFAULT 'surfaced',
+            last_shown_at   TEXT NOT NULL,
+            PRIMARY KEY (conversation_id, from_pillar, to_pillar)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_pillar_connections_seen_conv
+            ON pillar_connections_seen(conversation_id, status);
         ",
     )?;
 

@@ -21,6 +21,7 @@ Produce clear, phased implementation plans that account for the full stack. Neve
 - `commands/review.rs` — SM-2 spaced repetition: `record_review_attempt`, `get_due_reviews`, `get_review_counts` (uses per-call `db::get_connection`)
 - `commands/summaries.rs` — post-session summaries: `save_conversation_summary`, `get_conversation_summary`, `list_recent_summaries`, `seed_review_items_from_summary`
 - `commands/digest.rs` — weekly digest: `generate_weekly_digest`, `get_weekly_digests`, `maybe_generate_due_digest`, `export_weekly_digest` (per-call `db::get_connection` + `collect_completion`)
+- `commands/connections.rs` — cross-pillar connection surfacing: `detect_connections`, `dismiss_connection` (per-call `db::get_connection` + best-effort `collect_completion` topic tagging; static `STATIC_CONNECTIONS` graph mirrors TS `pillarConnections.ts`; tables `conversation_topics`, `pillar_connections_seen`)
 - `commands/schedule.rs` — `get_today_schedule`, `schedule_notification`
 - `commands/sync_server.rs` — Axum sync server start/stop/status
 - `commands/voice.rs` — STT model management, `transcribe_audio`, `tts_elevenlabs`, `get_elevenlabs_voices`
