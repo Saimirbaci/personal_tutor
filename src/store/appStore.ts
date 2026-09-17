@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import {
   AiMessage,
+  Commitment,
   DriftReport,
   EffortMasteryMatrix,
   ForgettingCurveSettings,
@@ -114,6 +115,13 @@ interface AppState {
   pillarDrift: DriftReport | null;
   planAdjustments: PlanAdjustment[] | null;
 
+  // Commitment contracts (raw backend list — ephemeral, never persisted).
+  // Groupings (active/missed) are computed in selectors/components.
+  commitments: Commitment[];
+  // Local hour (0–23) at which the evening-before commitment reminder may
+  // start firing. Persisted.
+  commitmentReminderHour: number;
+
   // Voice
   voiceConfig: VoiceConfig;
 
@@ -164,6 +172,8 @@ interface AppState {
   setEffortMatrix: (matrix: EffortMasteryMatrix | null) => void;
   setPillarDrift: (d: DriftReport | null) => void;
   setPlanAdjustments: (a: PlanAdjustment[] | null) => void;
+  setCommitments: (c: Commitment[]) => void;
+  setCommitmentReminderHour: (hour: number) => void;
   setProviderConfig: (c: ProviderConfig) => void;
   toggleSidebar: () => void;
   setMobileSidebarOpen: (open: boolean) => void;
@@ -217,6 +227,9 @@ export const useAppStore = create<AppState>()(
 
       pillarDrift: null,
       planAdjustments: null,
+
+      commitments: [],
+      commitmentReminderHour: 18,
 
       voiceConfig: {
         enabled: false,
@@ -367,6 +380,9 @@ export const useAppStore = create<AppState>()(
       setEffortMatrix: (matrix) => set({ effortMatrix: matrix }),
       setPillarDrift: (d) => set({ pillarDrift: d }),
       setPlanAdjustments: (a) => set({ planAdjustments: a }),
+      setCommitments: (c) => set({ commitments: c }),
+      setCommitmentReminderHour: (hour) =>
+        set({ commitmentReminderHour: Math.min(23, Math.max(0, Math.round(hour))) }),
       setProviderConfig: (c) => set({ providerConfig: c }),
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
       setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
@@ -393,6 +409,7 @@ export const useAppStore = create<AppState>()(
         socraticModeByPillar: state.socraticModeByPillar,
         activationQuizEnabled: state.activationQuizEnabled,
         activationQuizLength: state.activationQuizLength,
+        commitmentReminderHour: state.commitmentReminderHour,
       }),
     }
   )

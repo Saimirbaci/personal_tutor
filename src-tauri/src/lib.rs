@@ -3,7 +3,7 @@ pub mod commands;
 pub mod db;
 
 use commands::{
-    activation, ai as ai_cmd, analytics, connections, conversations as conv_cmd, depth,
+    activation, ai as ai_cmd, analytics, connections, commitments, conversations as conv_cmd, depth,
     digest as digest_cmd, gaps, listen, mastery, progress, rebalance, review, schedule,
     source as source_cmd, streak, summaries as summary_cmd, sync_server as sync_cmd,
     voice as voice_cmd,
@@ -80,6 +80,15 @@ pub fn run() {
             digest_cmd::get_weekly_digests,
             digest_cmd::maybe_generate_due_digest,
             digest_cmd::export_weekly_digest,
+            // Commitment contracts & accountability
+            commitments::create_commitment,
+            commitments::list_commitments,
+            commitments::update_commitment_status,
+            commitments::delete_commitment,
+            commitments::get_due_reminders,
+            commitments::mark_commitment_reminded,
+            commitments::get_missed_commitments,
+            commitments::reschedule_commitment,
             rebalance::get_pillar_drift,
             rebalance::generate_plan_rebalance,
             rebalance::get_plan_adjustments,

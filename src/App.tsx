@@ -42,6 +42,7 @@ import { useAppStore } from '@/store/appStore';
 import { useProgress } from '@/hooks/useProgress';
 import { usePlanRebalance } from '@/hooks/usePlanRebalance';
 import { useForgettingCurve } from '@/hooks/useForgettingCurve';
+import { useCommitmentReminders } from '@/hooks/useCommitmentReminders';
 
 const pageVariants = {
   initial: { opacity: 0, y: 8 },
@@ -54,6 +55,8 @@ export default function App() {
   const { maybeGenerateDue, loadAdjustments } = usePlanRebalance();
   // Forgetting-curve nudges: own internal poll, fires only while the app is open.
   useForgettingCurve();
+  // Evening-before commitment reminders: same poll pattern, backend-deduped.
+  useCommitmentReminders();
   const { currentView, activePillar } = useAppStore();
   const navigate = useNavigate();
   const location = useLocation();
