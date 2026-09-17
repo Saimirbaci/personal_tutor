@@ -72,6 +72,17 @@ npm run lint                   # ESLint (if configured)
 - [ ] "Teach from this" seeds `buildTeachPrompt` and the resulting GenUI flashcard/quiz blocks render and feed spaced repetition
 - [ ] `source.rs` unit tests (extraction, boilerplate stripping, title/og:title fallback, URL scheme/host validation, private-host rejection, truncation, excerpt bounding) pass via `cargo test`
 
+### After any cross-pillar connection change:
+- [ ] After a response lands, a relevant `ConnectionCallout` card may surface inline (static graph hit) — the empty text bubble is suppressed; only the card renders
+- [ ] A neighbor pillar touched within `RECENT_EVIDENCE_DAYS` (10) shows a "you covered X" evidence line and a deep-link when a conversation id is known
+- [ ] "Open that session" switches to the related thread (via `pendingConversationOpen` / `requestOpenConversation`), consumed once
+- [ ] Dismiss hides the card immediately and persists — the same pair (in either order) does not resurface for that conversation
+- [ ] Detection is once-per-conversation-per-session (no re-injection on navigate-away/return) unless `force`d
+- [ ] Missing/invalid API key degrades gracefully to static-only callouts — no UI crash (dynamic topic discovery simply skipped)
+- [ ] Detection never fires mid-stream; switching threads mid-detection does not inject a card into the wrong conversation
+- [ ] TS `pillarConnections.ts` (`PILLAR_CONNECTIONS`) and Rust `STATIC_CONNECTIONS` stay in sync (same pairs/labels/weights)
+- [ ] `connections.rs` unit tests (static graph validity, `jaccard`, dynamic ranking + threshold, static recency scoring, merge/`both` collapse + order-independence, `parse_topic_tags` tolerance/cap, `strip_genui`, dismiss/dedupe bookkeeping, topics roundtrip) pass via `cargo test`
+
 ## GenUI Parser Tests (Critical)
 The `parseGenUIBlocks` function in `appStore.ts` is core to the learning experience. Always verify:
 - Tags are fully stripped from returned `text`

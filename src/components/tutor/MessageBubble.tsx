@@ -23,7 +23,9 @@ export default function MessageBubble({ message, pillar }: MessageBubbleProps) {
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div className={`max-w-[82%] space-y-3 ${isUser ? 'items-end' : 'items-start'} flex flex-col`}>
 
-        {/* Message bubble */}
+        {/* Message bubble — suppressed for GenUI-only messages (e.g. an injected
+            connection callout) so no empty bubble box renders above the card. */}
+        {(message.content || isUser) && (
         <div
           className={`relative rounded-2xl px-4 py-3 text-sm leading-relaxed w-full ${
             isUser
@@ -64,6 +66,7 @@ export default function MessageBubble({ message, pillar }: MessageBubbleProps) {
             )
           )}
         </div>
+        )}
 
         {/* GenUI blocks */}
         {message.genui && message.genui.length > 0 && (

@@ -1,6 +1,6 @@
 import { Component, type ReactNode } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { ConversationSummary, GenUIBlock, PillarId, SessionSummaryData } from '@/data/types';
+import { ConnectionCallout as ConnectionCalloutData, ConversationSummary, GenUIBlock, PillarId, SessionSummaryData } from '@/data/types';
 import { useAppStore } from '@/store/appStore';
 import SummaryCard from '@/components/SummaryCard';
 import Diagram from './Diagram';
@@ -10,6 +10,7 @@ import CodeBlock from './CodeBlock';
 import ConceptMap from './ConceptMap';
 import Timeline from './Timeline';
 import KeyInsight from './KeyInsight';
+import ConnectionCallout from './ConnectionCallout';
 
 /** Adapts an inline session-summary block into a SummaryCard for the active conversation. */
 function SessionSummaryRenderer({ data, pillar }: { data: SessionSummaryData; pillar?: PillarId | null }) {
@@ -125,6 +126,9 @@ function BlockContent({ block, pillar }: GenUIRendererProps) {
 
     case 'session-summary':
       return <SessionSummaryRenderer data={block.data as SessionSummaryData} pillar={pillar} />;
+
+    case 'connection':
+      return <ConnectionCallout data={block.data as ConnectionCalloutData} />;
 
     default:
       return null;

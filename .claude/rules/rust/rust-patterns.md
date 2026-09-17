@@ -30,7 +30,7 @@ pub async fn command_name(
 ## Database (rusqlite)
 Two access patterns coexist — pick one consistently per command file:
 - **Shared `DbState(pub Mutex<Connection>)`** — preferred for write-heavy or transactional flows. Always `lock().map_err(|e| e.to_string())?` — never `.unwrap()`. Lock for the shortest possible scope; extract data and release before any `await`.
-- **Per-call `db::get_connection(&app)`** — opens a fresh `Connection` (used by `review.rs`, `rebalance.rs`, `mastery.rs`, and `listen.rs`). Safe under WAL for short reads/writes; useful for synchronous `#[tauri::command] pub fn` handlers that don't share state. `listen.rs` does a brief synchronous `get_connection` read to gather learner context, then releases it before the async AI + TTS work.
+- **Per-call `db::get_connection(&app)`** — opens a fresh `Connection` (used by `review.rs`, `rebalance.rs`, `mastery.rs`, `listen.rs`, and `connections.rs`). Safe under WAL for short reads/writes; useful for synchronous `#[tauri::command] pub fn` handlers that don't share state. `listen.rs` does a brief synchronous `get_connection` read to gather learner context, then releases it before the async AI + TTS work. `connections.rs::detect_connections` does the same: open a connection for a brief read (activity, topics, dismissals), drop it, run the async tagging classifier, then re-open to record surfaced rows — never hold a `Connection` across the `collect_completion` await.
 
 Rules that apply to both:
 - Use parameterized queries exclusively: `params![val1, val2]`

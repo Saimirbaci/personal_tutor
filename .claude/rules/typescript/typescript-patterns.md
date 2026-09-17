@@ -49,12 +49,14 @@ useEffect(() => {
 - Forgetting curve: `useForgettingCurve` — in-app poll that fires OS nudges (quiet-hours + daily-cap gated); `useForgettingNudgePreview` is a read-only fetch that must NOT call `mark_review_notified`
 - Source import: `useSourceImport` — `importUrl(url, generateBrief?)` calls `fetch_and_summarize_url` (threads `providerConfig`), exposes `isImporting`/`error`, swallows failures into `error` state and returns `null` (never throws); pure URL/prompt helpers (`detectUrl`, `buildTeachPrompt`) live in `src/lib/sourceImport.ts`
 - Listen Mode: `useListenMode` — `generate(pillar, topic)` calls `generate_audio_lesson`, subscribes to `audio-lesson-progress`, decodes the base64 MP3 to a Blob object URL for `<audio>` (revokes the URL on replace/unmount); exposes `{ generate, isGenerating, lesson, audioUrl, progress, error, reset }`
+- Cross-pillar connections: `useConnections` — exports module-level `runConnectionDetection(conversationId, pillar, {force?})` (fire-and-forget background detection, see below) plus a `useConnections()` read hook for manual refresh; the pure static-graph helper `connectionsForPillar(pillar)` lives in `src/data/pillarConnections.ts` (the TS mirror of the Rust `STATIC_CONNECTIONS` graph — keep the two in sync)
 - Background polls/timers must guard against React StrictMode double-mount (e.g. a `startedRef`) and clear their interval on cleanup
 - Never call `tauriInvoke` directly inside React components
 
 ### Background classification (fire-and-forget)
-- Pattern: `useDepthScore.ts` exports a module-level async `runDepthScore(id, {force?})` (a plain function, not a React hook) alongside the read hook `useConversationDepth`. Use this when work is triggered by an event (navigate-away, unmount) rather than render.
-- Make it idempotent and safe: a module-scoped `inFlight` `Set` dedupes concurrent calls, skip while `isStreaming`, short-circuit if already computed, and **swallow errors** (a missing API key must never crash the caller — `console.error`, don't throw).
+- Pattern: `useDepthScore.ts` exports a module-level async `runDepthScore(id, {force?})` (a plain function, not a React hook) alongside the read hook `useConversationDepth`. `useConnections.ts::runConnectionDetection(conversationId, pillar, {force?})` follows the same shape. Use this when work is triggered by an event (navigate-away, unmount, response-landed) rather than render.
+- Make it idempotent and safe: a module-scoped `inFlight` `Set` dedupes concurrent calls, skip while `isStreaming`, short-circuit if already computed (depth) or already surfaced this session (connections — a `surfacedThisSession` `Set`), and **swallow errors** (a missing API key must never crash the caller — `console.error`, don't throw).
+- Re-check store state after the await before mutating it: `runConnectionDetection` re-reads `activeConversationId`/`isStreaming` before `addMessage`-ing its synthetic callout, so a thread switch mid-detection doesn't inject a card into the wrong conversation.
 - One-shot LLM calls (no streaming UI) go through the `collect_completion` Tauri command, not `stream_chat`.
 - GenUI/classifier text helpers live in `src/lib/genui.ts` (`stripGenUITags`, `parseDepthScore`, `DEPTH_SCORE_PROMPT`) — keep `parseDepthScore`'s clamp/fallback behavior in sync with Rust `depth.rs::parse_depth_payload`.
 
