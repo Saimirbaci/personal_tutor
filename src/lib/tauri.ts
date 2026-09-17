@@ -180,6 +180,21 @@ function getMockData<T>(cmd: string, _args?: Record<string, unknown>): Promise<T
       autoApplyRebalance: false,
     },
     set_rebalance_settings: null,
+    // Cross-pillar connection surfacing — a sample static callout for browser dev.
+    detect_connections: [
+      {
+        fromPillar: 'roadmap',
+        toPillar: 'communication',
+        label: 'Communicating strategy',
+        rationale:
+          'A roadmap only aligns the company if it is communicated with clarity, structure, and a compelling why.',
+        source: 'both',
+        recentEvidence: 'You covered communication 4 days ago — “Exec messaging frameworks”',
+        conversationId: null,
+        score: 0.9,
+      },
+    ],
+    dismiss_connection: null,
   };
 
   return Promise.resolve((mocks[cmd] ?? null) as T);

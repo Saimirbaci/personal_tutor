@@ -35,6 +35,7 @@ Rust Backend (Tauri v2 + rusqlite + Tokio)
     │   ├── activation.rs    → pre-session activation quiz (get_activation_quiz)
     │   ├── gaps.rs          → knowledge-gap detection (get_knowledge_gaps, detect_knowledge_gaps, dismiss_gap, mark_gap_drilled)
     │   ├── depth.rs         → session depth scoring (save/get/list_conversation_depth)
+    │   ├── connections.rs   → cross-pillar connection surfacing (detect_connections, dismiss_connection) — static graph + dynamic topic-overlap discovery
     │   ├── rebalance.rs     → drift detection + adaptive plan rebalancing (get_pillar_drift, generate/apply/dismiss_plan_adjustment, maybe_generate_due_rebalance, get/set_rebalance_settings)
     │   ├── schedule.rs      → get_today_schedule, schedule_notification
     │   ├── source.rs        → URL / paper import (fetch_and_summarize_url) — network/parse only, no DB; SSRF-guarded fetch + scraper HTML extraction + optional collect_completion teaching brief
@@ -65,6 +66,8 @@ AI responses can embed interactive UI blocks using this syntax:
 ```
 `parseGenUIBlocks()` in `appStore.ts::finalizeStream()` strips these from the visible text and attaches them as `AiMessage.genui`. The `GenUIRenderer` component renders each block type.
 
+**Injected (non-AI) GenUI:** `<genui type="connection">` is rendered by `ConnectionCallout`, but unlike the blocks above it is **not** emitted by the tutor — the frontend injects it. After a response lands, `runConnectionDetection` (see **Cross-Pillar Connection Surfacing**) calls the `detect_connections` command and, on a hit, `addMessage`s a synthetic, non-persisted assistant message whose `content` is empty and whose `genui` carries the callout(s). `MessageBubble` suppresses the empty text bubble so only the card renders. Its block data is validated by `isValidBlockData('connection', …)` (needs `fromPillar`/`toPillar`/`label`).
+
 **Non-rendered GenUI (classifier contract):** some blocks are an output *contract* for a background classifier rather than UI. `<genui type="depth-score">{"score": N, "rationale": "...", "dimensions": [...]}</genui>` is emitted by the session-depth classifier and parsed by `parseDepthScore()` in `src/lib/genui.ts` — it is never shown in chat. `src/lib/genui.ts` also holds `stripGenUITags()` (removes `<genui>` blocks from a transcript before sending it to a classifier) and `DEPTH_SCORE_PROMPT` (the classifier system prompt). See **Session Depth Scoring** below.
 
 ## AI Streaming
@@ -86,8 +89,8 @@ Per-pillar toggle that switches the tutor from explain-first to retrieval-forcin
 ## State Management
 Single Zustand store in `src/store/appStore.ts` with `persist` middleware.
 Persisted keys: `providerConfig`, `voiceConfig`, `forgettingCurveSettings`, `sidebarCollapsed`, `activePillar`, `socraticModeByPillar`, `activationQuizEnabled`, `activationQuizLength`.
-Ephemeral: all messages, streaming state, conversation list, progress data, `pillarDrift`, `planAdjustments`, `pendingPrompt` (NOT persisted).
-Actions: `toggleSocraticMode(pillar)`, `setSocraticMode(pillar, enabled)` for per-pillar Socratic toggle.
+Ephemeral: all messages, streaming state, conversation list, progress data, `pillarDrift`, `planAdjustments`, `pendingPrompt`, `pendingConversationOpen` (NOT persisted).
+Actions: `toggleSocraticMode(pillar)`, `setSocraticMode(pillar, enabled)` for per-pillar Socratic toggle; `requestOpenConversation(id)` / `consumeConversationOpen()` for the one-shot deep-link a connection callout uses to switch threads (`requestOpenConversation` also flips `currentView` to `tutor`).
 
 ## Database (rusqlite)
 SQLite at `{app_data_dir}/tutor.db`. WAL mode, foreign keys ON.
@@ -99,13 +102,15 @@ SQLite at `{app_data_dir}/tutor.db`. WAL mode, foreign keys ON.
 - **`mastery_scores`** — per-topic mastery (PK `pillar_id`+`item_id`; score, quiz_accuracy, ease_norm, depth_norm)
 - **`knowledge_gaps`** — auto-detected gaps (PK `gap_id`; pillar, topic_key, severity, signal_summary, status; UNIQUE pillar+topic_key)
 - **`conversation_depth`** — engagement-depth assessment per conversation (PK `conversation_id` → conversations ON DELETE CASCADE; score 1–5, rationale, dimensions JSON, model, message_count)
+- **`conversation_topics`** — per-conversation topic fingerprint for dynamic connection discovery (PK `conversation_id` → conversations ON DELETE CASCADE; pillar, topics JSON array, model, updated_at; indexed on pillar)
+- **`pillar_connections_seen`** — surfaced/dismissed cross-pillar callout bookkeeping (PK `conversation_id`+`from_pillar`+`to_pillar`, conversation_id → conversations ON DELETE CASCADE; status surfaced/dismissed, last_shown_at; pairs stored order-independently)
 - **`settings`** — key/value store
 - **`plan_adjustments`** — weekly rebalance proposals (week_start UNIQUE, week_number, rationale, adjustments JSON, status proposed/applied/dismissed, applied_at)
 - **`settings`** — key/value store (also holds rebalance settings, e.g. `drift_threshold_days`)
 
 Two DB access patterns coexist:
 - `DbState(Mutex<Connection>)` — shared connection, locked per call (used by most commands)
-- `db::get_connection(&app)` — opens a fresh `rusqlite::Connection` per call (used by `review.rs` and most newer feature commands: `mastery.rs`, `activation.rs`, `gaps.rs`, `depth.rs`); safe under WAL but bypasses the shared mutex. Preferred for synchronous `#[tauri::command] pub fn` handlers that don't share state.
+- `db::get_connection(&app)` — opens a fresh `rusqlite::Connection` per call (used by `review.rs` and most newer feature commands: `mastery.rs`, `activation.rs`, `gaps.rs`, `depth.rs`, `connections.rs`); safe under WAL but bypasses the shared mutex. Preferred for synchronous `#[tauri::command] pub fn` handlers that don't share state.
 
 Not every command touches the database: `source.rs` (`fetch_and_summarize_url`) is a pure network/parse command and uses **neither** access pattern — it has no `DbState`, no `get_connection`, and no SQL.
 
@@ -127,7 +132,7 @@ Default: `anthropic / claude-sonnet-4-5`.
 
 ## Key Types
 All TypeScript interfaces in `src/data/types.ts`. Match Rust serde structs exactly (camelCase).
-Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`, `MasteryScore`, `ActivationResult`, `KnowledgeGap`, `GapSignalKind`, `DepthScore`, `DepthScoreData`, `ConversationDepth`, `PillarDrift`, `DriftReport`, `PillarStatus`, `AdjustmentStatus`, `PillarAdjustment`, `PlanAdjustment`, `RebalanceSettings`, `SourceSummary`, `FetchSourceRequest`, `AudioLesson`, `AudioLessonProgress`.
+Key types: `PillarId`, `AiMessage`, `GenUIBlock`, `ProviderConfig`, `VoiceConfig`, `SessionLog`, `ProgressData`, `TodaySchedule`, `ReviewItem`, `ReviewCounts`, `MasteryScore`, `ActivationResult`, `KnowledgeGap`, `GapSignalKind`, `DepthScore`, `DepthScoreData`, `ConversationDepth`, `PillarDrift`, `DriftReport`, `PillarStatus`, `AdjustmentStatus`, `PillarAdjustment`, `PlanAdjustment`, `RebalanceSettings`, `SourceSummary`, `FetchSourceRequest`, `AudioLesson`, `AudioLessonProgress`, `PillarConnection`, `ConnectionSource`, `ConnectionCallout`.
 
 ## Spaced Repetition
 SM-2 algorithm in `src-tauri/src/commands/review.rs`. Quality grades 0–5 (≥3 passes). Failed reviews reset interval to 1 day; ease factor floored at 1.3.
@@ -152,6 +157,16 @@ Rates how deeply a learner engaged in a conversation on a 1–5 rubric (1 = surf
 - `src/hooks/useDepthScore.ts` — `runDepthScore(conversationId, {force?})` is idempotent and concurrency-safe (module-scoped `inFlight` dedupe, skips while `isStreaming`, short-circuits if already scored, swallows errors). `useConversationDepth(id)` reads a single assessment. `TutorChat` triggers scoring on navigate-away/new/switch/unmount and shows a `DepthIndicator` chip in the sidebar.
 - `depth.rs` — `save_conversation_depth` (clamps 1–5, preserves original `created_at` on re-score, bumps the conversation's `updated_at`), `get_conversation_depth`, `list_conversation_depths`. Persists to `conversation_depth`. Has unit tests for clamping, float/string-score tolerance, malformed dimensions, and list ordering.
 - Types: `DepthScore` (1|2|3|4|5), `DepthScoreData`, `ConversationDepth`.
+
+## Cross-Pillar Connection Surfacing
+Surfaces semantic links between the 12 Growth Pillars so the learner builds an integrated mental model instead of siloed topics. Two layers: a **static hand-curated graph** and **dynamic topic-overlap discovery**. Backend lives in `src-tauri/src/commands/connections.rs` (per-call `db::get_connection` pattern, like `review.rs`/`mastery.rs`); pure helpers are unit-tested in the same file.
+- **Static graph**: `STATIC_CONNECTIONS` (Rust) mirrors `src/data/pillarConnections.ts` (`PILLAR_CONNECTIONS`) — undirected `(a,b,label,rationale,weight)` pairs. The two **must stay in sync** (a Rust test, `static_graph_is_valid`, enforces no self-loops / valid pillars / 0–1 weights / no dup pairs). `connectionsForPillar(pillar)` (TS) / `static_neighbors(pillar)` (Rust) return de-duped neighbors as the *other* end.
+- **`detect_connections(conversationId, pillar, config) -> Vec<ConnectionCallout>`**: brief synchronous DB read (pillar activity, existing topics, dismissed pairs, other conversations' topics) → `compute_static_connections` (scores neighbors, recency-boosts those touched within `RECENT_EVIDENCE_DAYS = 10` and adds a "you covered X" evidence line) → best-effort dynamic step → `merge_connections` (collapses the same unordered pair to one `both`-sourced callout, summing score, preferring curated label + grafting dynamic evidence) → filter dismissed → cap at `MAX_CALLOUTS = 3` → record surfaced. Dismissed pairs always win over a surfaced re-write.
+- **Dynamic discovery** (best-effort, degrades to static-only on any failure): `resolve_topics` reuses persisted `conversation_topics` or tags the transcript via `collect_completion` + `CONNECTION_TAG_PROMPT` (`parse_topic_tags` tolerantly extracts a bounded, lowercased, deduped tag list), then `compute_dynamic_connections` ranks cross-pillar `jaccard` topic overlap above `MIN_DYNAMIC_OVERLAP = 0.12`, keeping the best match per neighbor pillar. `strip_genui` cleans transcript prose (mirrors `stripGenUITags`).
+- **`dismiss_connection(conversationId, fromPillar, toPillar)`**: upserts the pair as `dismissed` in `pillar_connections_seen` (order-independent) so it stops surfacing for that conversation.
+- **Prompt hint**: `useAI.ts::buildConnectionsSection` injects a "RELATED PILLARS" block (top 3 static neighbors) into the system prompt so the tutor can weave links in narratively — separate from the post-response callout cards.
+- **Frontend**: hook `src/hooks/useConnections.ts` exports module-level `runConnectionDetection(conversationId, pillar, {force?})` (fire-and-forget, mirrors `runDepthScore`: `inFlight` dedupe, `surfacedThisSession` once-per-session guard, skips while streaming, swallows errors) plus the `useConnections()` read hook. On a hit it `addMessage`s a synthetic non-persisted assistant message carrying `<genui type="connection">` callouts. `TutorChat` fires it after each response lands and consumes `pendingConversationOpen` to deep-link into a related thread. Component: `src/components/tutor/genui/ConnectionCallout.tsx` (two-pillar card, evidence line, "Open that session" deep-link via `requestOpenConversation`, dismiss → `dismiss_connection`).
+- Types: `PillarConnection`, `ConnectionSource` (`static`|`dynamic`|`both`), `ConnectionCallout`.
 
 ## Drift Detection & Adaptive Rebalancing
 "Drift" = Growth Pillars that have planned hours but no recent activity (older than the drift threshold, default 7 days). Logic lives in `src-tauri/src/commands/rebalance.rs` (per-call `db::get_connection` pattern, like `review.rs`). Pure helpers `compute_drift`, `compute_rebalance`, and `load_applied_adjustments` are unit-tested.

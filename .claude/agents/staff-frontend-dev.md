@@ -98,10 +98,13 @@ function GenUIBlock({ block }: { block: GenUIBlock }) {
 
 ### Adding a New GenUI Block Type
 1. Add to `GenUIBlock['type']` union in `src/data/types.ts`
-2. Add data interface (e.g., `SpacedRepetitionData`) in `src/data/types.ts`
+2. Add data interface (e.g., `ConnectionCallout`) in `src/data/types.ts`
 3. Update `parseGenUIBlocks()` in `appStore.ts` — decide if data is JSON or raw string
-4. Create renderer component in `src/components/genui/`
-5. Add case to `GenUIRenderer` switch
+4. Add a guard to `isValidBlockData(type, data)` in `appStore.ts` so malformed payloads are dropped
+5. Create renderer component in `src/components/tutor/genui/`
+6. Add a `case` to the `BlockContent` switch in `src/components/tutor/genui/index.tsx`
+
+Note: not every block type comes from AI text. A type can be **injected** by the frontend — `connection` is built by `useConnections.ts::runConnectionDetection` and added as a synthetic non-persisted assistant message whose `content` is empty (`MessageBubble` suppresses the empty bubble). Such types still need the type-union entry, the `isValidBlockData` guard, and a renderer `case`, but no `parseGenUIBlocks` change.
 
 ### AI System Prompt (in `src/hooks/useAI.ts`)
 ```typescript

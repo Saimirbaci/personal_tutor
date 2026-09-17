@@ -3,9 +3,10 @@ pub mod commands;
 pub mod db;
 
 use commands::{
-    activation, ai as ai_cmd, analytics, conversations as conv_cmd, depth, digest as digest_cmd,
-    gaps, listen, mastery, progress, rebalance, review, schedule, source as source_cmd,
-    streak, summaries as summary_cmd, sync_server as sync_cmd, voice as voice_cmd,
+    activation, ai as ai_cmd, analytics, connections, conversations as conv_cmd, depth,
+    digest as digest_cmd, gaps, listen, mastery, progress, rebalance, review, schedule,
+    source as source_cmd, streak, summaries as summary_cmd, sync_server as sync_cmd,
+    voice as voice_cmd,
 };
 use sync_cmd::SyncServerHandle;
 use tauri::Manager;
@@ -68,6 +69,9 @@ pub fn run() {
             depth::save_conversation_depth,
             depth::get_conversation_depth,
             depth::list_conversation_depths,
+            // Cross-pillar connection surfacing commands
+            connections::detect_connections,
+            connections::dismiss_connection,
             source_cmd::fetch_and_summarize_url,
             schedule::get_today_schedule,
             schedule::schedule_notification,
